@@ -1,17 +1,7 @@
-import { useEffect, useRef, useState } from "react";
-import { Check, Copy, FileText, TerminalSquare } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { cn } from "@/lib/utils";
-import type { ProjectConfig, ProjectLogEntry, ProjectRuntime } from "@/shared/contracts";
+import { useEffect, useMemo, useRef } from "react";
+import { TerminalSquare } from "lucide-react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import type { ProjectConfig, ProjectRuntime } from "@/shared/contracts";
 
 type ProjectLogsDialogProps = {
   open: boolean;
@@ -20,35 +10,16 @@ type ProjectLogsDialogProps = {
   onOpenChange: (open: boolean) => void;
 };
 
-function formatTimestamp(timestamp: string) {
-  return new Intl.DateTimeFormat("zh-CN", {
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hour12: false,
-  }).format(new Date(timestamp));
-}
-
-function getLevelBadge(entry: ProjectLogEntry) {
-  switch (entry.level) {
-    case "stderr":
-      return "border-rose-400/20 bg-rose-400/10 text-rose-100";
-    case "system":
-      return "border-sky-400/20 bg-sky-400/10 text-sky-100";
-    default:
-      return "border-white/10 bg-white/5 text-muted-foreground";
+function createTerminalText(runtime?: ProjectRuntime) {
+  if (!runtime?.recentLogs?.length) {
+    return "";
   }
-}
 
-function getLevelLabel(entry: ProjectLogEntry) {
-  switch (entry.level) {
-    case "stderr":
-      return "错误输出";
-    case "system":
-      return "系统";
-    default:
-      return "标准输出";
-  }
+  return runtime.recentLogs
+    .filter((entry) => entry.level !== "system")
+    .map((entry) => entry.message.trimEnd())
+    .filter(Boolean)
+    .join("\n");
 }
 
 export function ProjectLogsDialog({
@@ -57,132 +28,87 @@ export function ProjectLogsDialog({
   runtime,
   onOpenChange,
 }: ProjectLogsDialogProps) {
+  const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const bottomAnchorRef = useRef<HTMLDivElement | null>(null);
-  const logs = runtime?.recentLogs ?? [];
-  const [copied, setCopied] = useState(false);
-  const copiedResetRef = useRef<number | null>(null);
+  const terminalText = useMemo(() => createTerminalText(runtime), [runtime]);
+
+  function scrollToBottom() {
+    const container = scrollContainerRef.current;
+    const anchor = bottomAnchorRef.current;
+
+    if (!container) {
+      return;
+    }
+
+    container.scrollTop = container.scrollHeight;
+    anchor?.scrollIntoView({ block: "end" });
+  }
 
   useEffect(() => {
     if (!open) {
       return;
     }
 
-    bottomAnchorRef.current?.scrollIntoView({ block: "end" });
-  }, [logs, open]);
+    const firstFrame = window.requestAnimationFrame(() => {
+      scrollToBottom();
 
-  useEffect(() => {
+      window.requestAnimationFrame(() => {
+        scrollToBottom();
+      });
+    });
+
+    const settleTimer = window.setTimeout(() => {
+      scrollToBottom();
+    }, 120);
+
+    const lateTimer = window.setTimeout(() => {
+      scrollToBottom();
+    }, 320);
+
+    const interval = window.setInterval(() => {
+      scrollToBottom();
+    }, 80);
+
+    const stopIntervalTimer = window.setTimeout(() => {
+      window.clearInterval(interval);
+    }, 1400);
+
     return () => {
-      if (copiedResetRef.current) {
-        window.clearTimeout(copiedResetRef.current);
-      }
+      window.cancelAnimationFrame(firstFrame);
+      window.clearTimeout(settleTimer);
+      window.clearTimeout(lateTimer);
+      window.clearTimeout(stopIntervalTimer);
+      window.clearInterval(interval);
     };
-  }, []);
-
-  function handleCopyLogs() {
-    if (logs.length === 0) {
-      return;
-    }
-
-    const content = logs
-      .map(
-        (entry) =>
-          `[${formatTimestamp(entry.at)}] [${getLevelLabel(entry)}] ${entry.message}`
-      )
-      .join("\n\n");
-
-    window.switchProjectApi.copyText(content);
-    setCopied(true);
-
-    if (copiedResetRef.current) {
-      window.clearTimeout(copiedResetRef.current);
-    }
-
-    copiedResetRef.current = window.setTimeout(() => {
-      setCopied(false);
-      copiedResetRef.current = null;
-    }, 1600);
-  }
+  }, [open, terminalText]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[88vh] overflow-hidden border-white/10 bg-[#0d1426]/96 p-0 backdrop-blur-xl sm:max-w-4xl">
-        <div className="flex max-h-[88vh] flex-col rounded-[24px] border border-white/6 bg-[radial-gradient(circle_at_top_right,rgba(62,207,196,0.12),transparent_30%),rgba(0,0,0,0.18)] p-6">
-          <DialogHeader className="shrink-0 space-y-3">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div className="space-y-2">
-                <DialogTitle className="text-2xl font-semibold tracking-tight">
-                  {project ? `${project.name} 日志` : "项目日志"}
-                </DialogTitle>
-                <DialogDescription className="break-all font-mono text-xs">
-                  {project?.path ?? "选择一个项目后，可以在这里查看运行输出。"}
-                </DialogDescription>
-              </div>
-              {project ? (
-                <Badge variant="outline" className="rounded-full px-3 py-1">
-                  v{project.nodeVersion}
-                </Badge>
-              ) : null}
-            </div>
+      <DialogContent
+        className="flex max-h-[88vh] overflow-hidden rounded-[24px] border-white/10 bg-[#0d1426]/96 p-0 backdrop-blur-xl sm:max-w-4xl"
+        onInteractOutside={(event) => event.preventDefault()}
+      >
+        <div className="flex min-h-0 w-full flex-col">
+          <DialogHeader className="shrink-0 border-b border-white/8 px-5 py-4">
+            <DialogTitle className="flex items-center gap-2 text-2xl font-semibold tracking-tight">
+              <TerminalSquare className="size-5 text-primary" />
+              {project ? `${project.name} 终端` : "终端"}
+            </DialogTitle>
           </DialogHeader>
 
-          <div className="mt-5 flex min-h-0 flex-1 flex-col overflow-hidden rounded-[22px] border border-white/8 bg-black/20">
-            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/8 px-4 py-3">
-              <div className="flex items-center gap-2 text-sm text-foreground">
-                <TerminalSquare className="size-4 text-primary" />
-                运行日志
+          <div ref={scrollContainerRef} className="min-h-0 flex-1 overflow-auto px-5 py-4">
+            {terminalText ? (
+              <>
+                <pre className="whitespace-pre-wrap break-words font-mono text-xs leading-6 text-foreground">
+                  {terminalText}
+                </pre>
+                <div ref={bottomAnchorRef} className="h-px w-full" />
+              </>
+            ) : (
+              <div className="flex h-full min-h-[420px] items-center justify-center text-sm text-muted-foreground">
+                暂无终端输出
               </div>
-              <div className="flex flex-wrap items-center gap-3">
-                <div className="text-xs text-muted-foreground">
-                  最近 {logs.length} 条记录
-                </div>
-                <Button
-                  variant="ghost"
-                  size="xs"
-                  className="h-7 px-2"
-                  onClick={handleCopyLogs}
-                  disabled={logs.length === 0}
-                >
-                  {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
-                  {copied ? "已复制" : "复制日志"}
-                </Button>
-              </div>
-            </div>
-
-            <ScrollArea className="h-[min(62vh,560px)]">
-              {logs.length === 0 ? (
-                <div className="flex min-h-[420px] flex-col items-center justify-center gap-3 px-6 text-center text-sm text-muted-foreground">
-                  <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-                    <FileText className="size-8 text-primary" />
-                  </div>
-                  <p>暂无日志，启动项目后会在这里显示输出。</p>
-                </div>
-              ) : (
-                <div className="space-y-3 p-4">
-                  {logs.map((entry) => (
-                    <div
-                      key={entry.id}
-                      className="rounded-xl border border-white/8 bg-black/15 p-3"
-                    >
-                      <div className="mb-2 flex flex-wrap items-center gap-2">
-                        <Badge
-                          variant="outline"
-                          className={cn("rounded-full", getLevelBadge(entry))}
-                        >
-                          {getLevelLabel(entry)}
-                        </Badge>
-                        <span className="font-mono text-[11px] text-muted-foreground">
-                          {formatTimestamp(entry.at)}
-                        </span>
-                      </div>
-                      <pre className="overflow-x-auto whitespace-pre-wrap break-words font-mono text-xs leading-6 text-foreground">
-                        {entry.message}
-                      </pre>
-                    </div>
-                  ))}
-                  <div ref={bottomAnchorRef} />
-                </div>
-              )}
-            </ScrollArea>
+            )}
           </div>
         </div>
       </DialogContent>

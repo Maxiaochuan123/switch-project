@@ -87,6 +87,10 @@ typings/
 
 # Vite
 .vite/
+dist/
 
 # Electron-Forge
 out/
+
+# Tauri
+src-tauri/target/

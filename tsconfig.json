@@ -9,8 +9,10 @@
     "jsx": "react-jsx",
     "sourceMap": true,
     "baseUrl": ".",
+    "ignoreDeprecations": "6.0",
     "types": [
-      "node"
+      "node",
+      "vite/client"
     ],
     "paths": {
       "@/*": [
@@ -20,5 +22,6 @@
     "outDir": "dist",
     "moduleResolution": "bundler",
     "resolveJsonModule": true
-  }
+  },
+  "exclude": ["node_modules", "dist", "src-tauri", ".vite"]
 }

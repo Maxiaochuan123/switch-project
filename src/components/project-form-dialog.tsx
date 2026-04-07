@@ -1,7 +1,11 @@
-import type { Dispatch, SetStateAction } from "react";
-import { FolderOpen, FolderOpenDot, TerminalSquare } from "lucide-react";
+import {
+  useEffect,
+  useState,
+  type Dispatch,
+  type SetStateAction,
+} from "react";
+import { CircleAlert, FolderOpen, Package, X } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -13,6 +17,16 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
+import type { ProjectDirectoryInspection } from "@/shared/contracts";
 
 export type ProjectDraft = {
   id?: string;
@@ -20,6 +34,8 @@ export type ProjectDraft = {
   path: string;
   nodeVersion: string;
   startCommand: string;
+  autoStartOnAppLaunch: boolean;
+  autoOpenLocalUrlOnStart: boolean;
 };
 
 type ProjectFormDialogProps = {
@@ -30,11 +46,42 @@ type ProjectFormDialogProps = {
   isSubmitting: boolean;
   isBrowsingPath: boolean;
   nodeVersionInstalled: boolean;
+  pathInspection: ProjectDirectoryInspection | null;
   onDraftChange: Dispatch<SetStateAction<ProjectDraft>>;
   onBrowsePath: () => void;
   onOpenChange: (open: boolean) => void;
   onSubmit: () => void;
 };
+
+type SettingSwitchRowProps = {
+  title: string;
+  description: string;
+  checked: boolean;
+  onCheckedChange: (checked: boolean) => void;
+};
+
+function FieldHeader({ label, htmlFor }: { label: string; htmlFor?: string }) {
+  return <Label htmlFor={htmlFor}>{label}</Label>;
+}
+
+function SettingSwitchRow({
+  title,
+  description,
+  checked,
+  onCheckedChange,
+}: SettingSwitchRowProps) {
+  return (
+    <div className="rounded-2xl border border-white/8 bg-black/10 p-4">
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0 flex-1">
+          <div className="font-medium text-foreground">{title}</div>
+          <p className="mt-2 text-sm leading-6 text-muted-foreground">{description}</p>
+        </div>
+        <Switch checked={checked} onCheckedChange={onCheckedChange} />
+      </div>
+    </div>
+  );
+}
 
 export function ProjectFormDialog({
   open,
@@ -44,198 +91,236 @@ export function ProjectFormDialog({
   isSubmitting,
   isBrowsingPath,
   nodeVersionInstalled,
+  pathInspection,
   onDraftChange,
   onBrowsePath,
   onOpenChange,
   onSubmit,
 }: ProjectFormDialogProps) {
+  const [visibleErrorMessage, setVisibleErrorMessage] = useState<string | null>(null);
+  const trimmedPath = draft.path.trim();
+  const trimmedNodeVersion = draft.nodeVersion.trim();
   const title = draft.id ? "编辑项目" : "新增项目";
 
+  useEffect(() => {
+    if (!open) {
+      setVisibleErrorMessage(null);
+      return;
+    }
+
+    if (!errorMessage) {
+      setVisibleErrorMessage(null);
+      return;
+    }
+
+    setVisibleErrorMessage(errorMessage);
+
+    const timer = window.setTimeout(() => {
+      setVisibleErrorMessage((current) => (current === errorMessage ? null : current));
+    }, 3200);
+
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [errorMessage, open]);
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl border-white/10 bg-[#0d1426]/95 p-0 backdrop-blur-xl">
-        <div className="rounded-[22px] border border-white/6 bg-[radial-gradient(circle_at_top_right,rgba(62,207,196,0.12),transparent_34%),rgba(0,0,0,0.14)] p-6">
-          <DialogHeader className="space-y-2">
-            <DialogTitle className="text-2xl font-semibold tracking-tight">
-              {title}
-            </DialogTitle>
-            <DialogDescription>
-              设置项目路径、所需的 Node 版本，以及在该目录下执行的启动命令。
-            </DialogDescription>
-          </DialogHeader>
-
-          <form
-            className="mt-6 space-y-5"
-            onSubmit={(event) => {
-              event.preventDefault();
-              onSubmit();
-            }}
-          >
-            <div className="grid gap-5 md:grid-cols-2">
-              <div className="space-y-2">
-                <Label htmlFor="project-name">项目名称</Label>
-                <Input
-                  id="project-name"
-                  value={draft.name}
-                  placeholder="admin-front"
-                  onChange={(event) =>
-                    onDraftChange((currentDraft) => ({
-                      ...currentDraft,
-                      name: event.target.value,
-                    }))
-                  }
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="node-version">Node 版本</Label>
-                <Input
-                  id="node-version"
-                  value={draft.nodeVersion}
-                  placeholder="20.11.1"
-                  onChange={(event) =>
-                    onDraftChange((currentDraft) => ({
-                      ...currentDraft,
-                      nodeVersion: event.target.value,
-                    }))
-                  }
-                />
+    <>
+      {visibleErrorMessage ? (
+        <div className="pointer-events-none fixed top-5 right-5 z-[90] w-full max-w-sm px-4 sm:px-0">
+          <div className="pointer-events-auto flex items-start gap-3 rounded-2xl border border-rose-400/20 bg-[#181120]/96 px-4 py-3 text-rose-50 shadow-2xl shadow-black/45 backdrop-blur-xl">
+            <CircleAlert className="mt-0.5 size-4 shrink-0 text-rose-300" />
+            <div className="min-w-0 flex-1">
+              <div className="text-sm font-medium">保存失败</div>
+              <div className="mt-1 text-sm leading-6 text-rose-100/90">
+                {visibleErrorMessage}
               </div>
             </div>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              className="-mr-1 text-rose-100 hover:bg-white/10 hover:text-white"
+              onClick={() => setVisibleErrorMessage(null)}
+            >
+              <X className="size-3.5" />
+            </Button>
+          </div>
+        </div>
+      ) : null}
 
-            <div className="space-y-2">
-              <Label htmlFor="project-path">项目路径</Label>
-              <div className="flex gap-2">
-                <Input
-                  id="project-path"
-                  value={draft.path}
-                  placeholder="C:\\Users\\admin\\Desktop\\my-project"
-                  onChange={(event) =>
-                    onDraftChange((currentDraft) => ({
-                      ...currentDraft,
-                      path: event.target.value,
-                    }))
-                  }
-                />
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="shrink-0"
-                  onClick={onBrowsePath}
-                  disabled={isBrowsingPath}
-                >
-                  <FolderOpen className="size-4" />
-                  {isBrowsingPath ? "打开中" : "浏览"}
-                </Button>
-              </div>
-            </div>
+      <Dialog open={open} onOpenChange={onOpenChange}>
+        <DialogContent className="max-h-[88vh] max-w-xl overflow-hidden border-0 bg-transparent p-0 shadow-none">
+          <div className="flex max-h-[88vh] flex-col rounded-[24px] border border-white/10 bg-[#0d1426]/95 backdrop-blur-xl">
+            <DialogHeader className="shrink-0 px-6 pt-6">
+              <DialogTitle className="text-2xl font-semibold tracking-tight">{title}</DialogTitle>
+              <DialogDescription>
+                先选择项目目录，系统会自动带出项目名称和启动命令，Node 版本由你手动选择。
+              </DialogDescription>
+            </DialogHeader>
 
-            <div className="space-y-2">
-              <Label htmlFor="start-command">启动命令</Label>
-              <Input
-                id="start-command"
-                value={draft.startCommand}
-                placeholder="pnpm dev"
-                onChange={(event) =>
-                  onDraftChange((currentDraft) => ({
-                    ...currentDraft,
-                    startCommand: event.target.value,
-                  }))
-                }
-              />
-            </div>
+            <ScrollArea className="min-h-0 flex-1 px-6">
+              <form
+                className="space-y-5 pb-6 pt-5"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  onSubmit();
+                }}
+              >
+                <section className="space-y-4 rounded-2xl border border-white/8 bg-black/10 p-4">
+                  <div className="text-sm font-medium text-foreground">基础信息</div>
 
-            <div className="grid gap-3 md:grid-cols-2">
-              <div className="rounded-2xl border border-white/8 bg-black/10 p-4 text-sm text-muted-foreground">
-                <div className="mb-2 flex items-center gap-2 text-xs uppercase tracking-[0.18em] text-foreground/80">
-                  <FolderOpenDot className="size-4 text-primary" />
-                  路径规则
-                </div>
-                请填写真实存在的项目目录。保存时会校验，路径不存在会导致启动失败。
-              </div>
+                  <div className="space-y-2">
+                    <FieldHeader htmlFor="project-path" label="项目目录" />
+                    <div className="flex gap-2">
+                      <Input
+                        id="project-path"
+                        value={draft.path}
+                        placeholder="C:\\Users\\admin\\Desktop\\my-project"
+                        onChange={(event) =>
+                          onDraftChange((current) => ({
+                            ...current,
+                            path: event.target.value,
+                          }))
+                        }
+                      />
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="shrink-0"
+                        onClick={onBrowsePath}
+                        disabled={isBrowsingPath}
+                      >
+                        <FolderOpen className="size-4" />
+                        {isBrowsingPath ? "选择中..." : "浏览"}
+                      </Button>
+                    </div>
+                  </div>
 
-              <div className="rounded-2xl border border-white/8 bg-black/10 p-4 text-sm text-muted-foreground">
-                <div className="mb-2 flex items-center gap-2 text-xs uppercase tracking-[0.18em] text-foreground/80">
-                  <TerminalSquare className="size-4 text-primary" />
-                  命令规则
-                </div>
-                请填写你平时在终端里执行的完整命令，例如 `npm run dev`、`pnpm dev`
-                或 `turbo dev`。
-              </div>
-            </div>
-
-            <div className="space-y-3 rounded-2xl border border-white/8 bg-black/10 p-4">
-              <div className="flex items-center justify-between gap-3">
-                <div className="text-xs uppercase tracking-[0.18em] text-foreground/80">
-                  本机已安装的 Node 版本
-                </div>
-                {draft.nodeVersion ? (
-                  <Badge
-                    variant="outline"
-                    className={
-                      nodeVersionInstalled
-                        ? "border-emerald-400/20 bg-emerald-400/10 text-emerald-100"
-                        : "border-amber-400/20 bg-amber-400/10 text-amber-100"
-                    }
-                  >
-                    {nodeVersionInstalled ? "本机已安装" : "本机缺失"}
-                  </Badge>
-                ) : null}
-              </div>
-
-              {installedNodeVersions.length > 0 ? (
-                <div className="flex flex-wrap gap-2">
-                  {installedNodeVersions.map((nodeVersion) => (
-                    <Button
-                      key={nodeVersion}
-                      type="button"
-                      variant={draft.nodeVersion === nodeVersion ? "default" : "outline"}
-                      size="xs"
-                      onClick={() =>
-                        onDraftChange((currentDraft) => ({
-                          ...currentDraft,
-                          nodeVersion,
+                  <div className="space-y-2">
+                    <FieldHeader htmlFor="project-name" label="项目名称" />
+                    <Input
+                      id="project-name"
+                      value={draft.name}
+                      placeholder="例如：admin-front"
+                      onChange={(event) =>
+                        onDraftChange((current) => ({
+                          ...current,
+                          name: event.target.value,
                         }))
                       }
-                    >
-                      v{nodeVersion}
-                    </Button>
-                  ))}
-                </div>
-              ) : (
-                <p className="text-sm text-muted-foreground">
-                  没有检测到 `nvm-windows` 已安装的 Node 版本。
-                </p>
-              )}
+                    />
+                  </div>
 
-              {!nodeVersionInstalled && draft.nodeVersion ? (
-                <Alert className="border-white/8 bg-black/10">
-                  <AlertTitle>版本未安装</AlertTitle>
-                  <AlertDescription>
-                    请先在这台机器上安装 `v{draft.nodeVersion}`，再启动项目。
-                  </AlertDescription>
-                </Alert>
-              ) : null}
-            </div>
+                  {trimmedPath &&
+                  pathInspection?.exists &&
+                  pathInspection.isDirectory &&
+                  !pathInspection.hasPackageJson ? (
+                    <Alert className="border-amber-400/20 bg-amber-400/10 text-amber-50">
+                      <Package className="size-4" />
+                      <AlertTitle>当前目录里没有 package.json</AlertTitle>
+                      <AlertDescription>
+                        可以继续保存，但这通常说明你选中的不是项目根目录。
+                      </AlertDescription>
+                    </Alert>
+                  ) : null}
+                </section>
 
-            {errorMessage ? (
-              <Alert variant="destructive" className="border-white/8 bg-black/10">
-                <AlertTitle>保存失败</AlertTitle>
-                <AlertDescription>{errorMessage}</AlertDescription>
-              </Alert>
-            ) : null}
+                <section className="space-y-4 rounded-2xl border border-white/8 bg-black/10 p-4">
+                  <div className="text-sm font-medium text-foreground">启动配置</div>
 
-            <DialogFooter className="pt-2">
+                  <div className="grid gap-4 md:grid-cols-[14rem_minmax(0,1fr)]">
+                    <div className="space-y-2">
+                      <FieldHeader label="Node 版本" />
+                      <Select
+                        value={draft.nodeVersion || undefined}
+                        onValueChange={(value) =>
+                          onDraftChange((current) => ({
+                            ...current,
+                            nodeVersion: value,
+                          }))
+                        }
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="请选择 Node 版本" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {installedNodeVersions.map((version) => (
+                            <SelectItem key={version} value={version}>
+                              v{version}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div className="space-y-2">
+                      <FieldHeader htmlFor="start-command" label="启动命令" />
+                      <Input
+                        id="start-command"
+                        value={draft.startCommand}
+                        placeholder="例如：npm run dev"
+                        onChange={(event) =>
+                          onDraftChange((current) => ({
+                            ...current,
+                            startCommand: event.target.value,
+                          }))
+                        }
+                      />
+                    </div>
+                  </div>
+
+                  {!nodeVersionInstalled && trimmedNodeVersion ? (
+                    <Alert className="border-amber-400/20 bg-amber-400/10 text-amber-50">
+                      <AlertTitle>这个 Node 版本还没安装</AlertTitle>
+                      <AlertDescription>
+                        先执行 {`nvm install ${trimmedNodeVersion}`}，安装完成后就能直接启动。
+                      </AlertDescription>
+                    </Alert>
+                  ) : null}
+                </section>
+
+                <section className="space-y-4 rounded-2xl border border-white/8 bg-black/10 p-4">
+                  <div className="text-sm font-medium text-foreground">启动行为</div>
+                  <div className="space-y-3">
+                    <SettingSwitchRow
+                      title="软件启动后自动启动项目"
+                      description="每次打开这个面板时，这个项目都会自动跟着启动。"
+                      checked={draft.autoStartOnAppLaunch}
+                      onCheckedChange={(checked) =>
+                        onDraftChange((current) => ({
+                          ...current,
+                          autoStartOnAppLaunch: checked,
+                        }))
+                      }
+                    />
+                    <SettingSwitchRow
+                      title="项目启动后自动打开本地地址"
+                      description="识别到 localhost 地址后，会自动在浏览器里打开一次。"
+                      checked={draft.autoOpenLocalUrlOnStart}
+                      onCheckedChange={(checked) =>
+                        onDraftChange((current) => ({
+                          ...current,
+                          autoOpenLocalUrlOnStart: checked,
+                        }))
+                      }
+                    />
+                  </div>
+                </section>
+              </form>
+            </ScrollArea>
+
+            <DialogFooter className="shrink-0 border-t border-white/8 px-6 py-4">
               <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
                 取消
               </Button>
-              <Button type="submit" disabled={isSubmitting}>
-                {isSubmitting ? "保存中" : "保存项目"}
+              <Button type="button" onClick={onSubmit} disabled={isSubmitting}>
+                {isSubmitting ? "保存中..." : "保存项目"}
               </Button>
             </DialogFooter>
-          </form>
-        </div>
-      </DialogContent>
-    </Dialog>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
