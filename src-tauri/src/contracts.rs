@@ -7,6 +7,8 @@ pub struct ProjectConfig {
     pub name: String,
     pub path: String,
     pub node_version: String,
+    #[serde(default = "default_project_package_manager")]
+    pub package_manager: ProjectPackageManager,
     pub start_command: String,
     #[serde(default)]
     pub auto_start_on_app_launch: bool,
@@ -86,6 +88,8 @@ pub struct ProjectRuntime {
 #[serde(rename_all = "camelCase")]
 pub struct DesktopEnvironment {
     pub installed_node_versions: Vec<String>,
+    pub available_package_managers: Vec<ProjectPackageManager>,
+    pub rimraf_installed: bool,
     pub nvm_home: Option<String>,
 }
 
@@ -103,6 +107,7 @@ pub enum ProjectNodeVersionSource {
 pub enum ProjectPackageManager {
     Npm,
     Pnpm,
+    Cnpm,
     Yarn,
 }
 
@@ -120,6 +125,7 @@ pub struct ProjectDirectoryInspection {
     pub exists: bool,
     pub is_directory: bool,
     pub has_package_json: bool,
+    pub has_node_modules: bool,
     pub suggested_name: Option<String>,
     pub recommended_node_version: Option<String>,
     pub node_version_hint: Option<String>,
@@ -155,6 +161,64 @@ pub struct AppCloseRequest {
     pub active_project_names: Vec<String>,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum DependencyOperation {
+    Delete,
+    Reinstall,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum DependencyOperationStatus {
+    InstallingDeleteTool,
+    Running,
+    Success,
+    Error,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DependencyOperationEvent {
+    pub project_id: String,
+    pub project_name: String,
+    pub operation: DependencyOperation,
+    pub status: DependencyOperationStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+}
+
 pub fn normalize_node_version(value: &str) -> String {
     value.trim().trim_start_matches(['v', 'V']).to_string()
+}
+
+pub fn default_project_package_manager() -> ProjectPackageManager {
+    ProjectPackageManager::Npm
+}
+
+pub fn build_run_command(package_manager: ProjectPackageManager, script_name: &str) -> String {
+    match package_manager {
+        ProjectPackageManager::Npm => format!("npm run {script_name}"),
+        ProjectPackageManager::Pnpm => format!("pnpm {script_name}"),
+        ProjectPackageManager::Cnpm => format!("cnpm run {script_name}"),
+        ProjectPackageManager::Yarn => format!("yarn {script_name}"),
+    }
+}
+
+pub fn build_install_command(package_manager: ProjectPackageManager) -> String {
+    match package_manager {
+        ProjectPackageManager::Npm => "npm install".to_string(),
+        ProjectPackageManager::Pnpm => "pnpm install".to_string(),
+        ProjectPackageManager::Cnpm => "cnpm install".to_string(),
+        ProjectPackageManager::Yarn => "yarn install".to_string(),
+    }
+}
+
+pub fn package_manager_command_name(package_manager: ProjectPackageManager) -> &'static str {
+    match package_manager {
+        ProjectPackageManager::Npm => "npm",
+        ProjectPackageManager::Pnpm => "pnpm",
+        ProjectPackageManager::Cnpm => "cnpm",
+        ProjectPackageManager::Yarn => "yarn",
+    }
 }

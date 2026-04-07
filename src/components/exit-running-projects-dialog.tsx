@@ -10,19 +10,24 @@ import {
   AlertDialogMedia,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { Button } from "@/components/ui/button";
 import type { AppCloseRequest } from "@/shared/contracts";
 
 type ExitRunningProjectsDialogProps = {
   request: AppCloseRequest | null;
   isConfirming: boolean;
+  isMinimizing: boolean;
   onConfirm: () => void;
+  onMinimize: () => void;
   onOpenChange: (open: boolean) => void;
 };
 
 export function ExitRunningProjectsDialog({
   request,
   isConfirming,
+  isMinimizing,
   onConfirm,
+  onMinimize,
   onOpenChange,
 }: ExitRunningProjectsDialogProps) {
   return (
@@ -56,6 +61,14 @@ export function ExitRunningProjectsDialog({
 
         <AlertDialogFooter>
           <AlertDialogCancel>取消</AlertDialogCancel>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={onMinimize}
+            disabled={isMinimizing || isConfirming}
+          >
+            {isMinimizing ? "最小化中..." : "最小化到托盘"}
+          </Button>
           <AlertDialogAction
             variant="destructive"
             onClick={(event) => {

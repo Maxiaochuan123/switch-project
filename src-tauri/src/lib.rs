@@ -1,5 +1,6 @@
 mod contracts;
 mod node_versions;
+mod package_managers;
 mod project_directory;
 mod runtime;
 mod store;
@@ -10,14 +11,23 @@ use std::sync::{
 };
 
 use contracts::{
-    AppCloseRequest, AppStartupSettings, DesktopEnvironment, ProjectConfig,
-    ProjectDirectoryInspection, ProjectRuntime,
+    AppCloseRequest, AppStartupSettings, DependencyOperation, DesktopEnvironment,
+    ProjectConfig, ProjectDirectoryInspection, ProjectRuntime,
 };
 use node_versions::{list_installed_node_versions, resolve_nvm_home};
+use package_managers::list_available_package_managers;
 use project_directory::inspect_project_directory as inspect_project_directory_impl;
-use runtime::{open_project_terminal as open_project_terminal_window, RuntimeManager};
+use runtime::{
+    ensure_delete_tool_ready, is_delete_tool_ready,
+    open_project_terminal as open_project_terminal_window,
+    run_delete_project_node_modules_task, run_reinstall_project_node_modules_task, RuntimeManager,
+};
 use store::AppStore;
-use tauri::{AppHandle, Emitter, Manager, State, WindowEvent};
+use tauri::{
+    menu::{MenuBuilder, MenuItemBuilder},
+    tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
+    AppHandle, Emitter, Manager, State, WindowEvent,
+};
 use tauri_plugin_opener::OpenerExt;
 
 pub struct ManagedState {
@@ -66,6 +76,8 @@ fn inspect_project_directory(
 fn get_environment() -> Result<DesktopEnvironment, String> {
     Ok(DesktopEnvironment {
         installed_node_versions: list_installed_node_versions(),
+        available_package_managers: list_available_package_managers(),
+        rimraf_installed: is_delete_tool_ready()?,
         nvm_home: resolve_nvm_home().map(|value| value.to_string_lossy().to_string()),
     })
 }
@@ -139,6 +151,78 @@ fn open_external(app: AppHandle, url: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn minimize_app_to_tray(app: AppHandle, state: State<ManagedState>) -> Result<(), String> {
+    *state.pending_close_request.lock().map_err(lock_error)? = None;
+
+    if let Some(window) = app.get_webview_window("main") {
+        window.hide().map_err(|error| format!("最小化到托盘失败: {error}"))?;
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
+fn delete_project_node_modules(
+    app: AppHandle,
+    state: State<'_, ManagedState>,
+    project_id: String,
+) -> Result<(), String> {
+    let project = state
+        .store
+        .lock()
+        .map_err(lock_error)?
+        .get_project(&project_id)
+        .ok_or_else(|| "项目不存在。".to_string())?;
+
+    if state.runtime_manager.is_project_active(&project.id) {
+        return Err("项目正在运行，请先停止后再删除依赖。".to_string());
+    }
+
+    state
+        .runtime_manager
+        .begin_dependency_operation(&project.id, DependencyOperation::Delete)?;
+
+    tauri::async_runtime::spawn(async move {
+        run_delete_project_node_modules_task(app, project).await;
+    });
+
+    Ok(())
+}
+
+#[tauri::command]
+fn reinstall_project_node_modules(
+    app: AppHandle,
+    state: State<'_, ManagedState>,
+    project_id: String,
+) -> Result<(), String> {
+    let project = state
+        .store
+        .lock()
+        .map_err(lock_error)?
+        .get_project(&project_id)
+        .ok_or_else(|| "项目不存在。".to_string())?;
+
+    if state.runtime_manager.is_project_active(&project.id) {
+        return Err("项目正在运行，请先停止后再重装依赖。".to_string());
+    }
+
+    state
+        .runtime_manager
+        .begin_dependency_operation(&project.id, DependencyOperation::Reinstall)?;
+
+    tauri::async_runtime::spawn(async move {
+        run_reinstall_project_node_modules_task(app, project).await;
+    });
+
+    Ok(())
+}
+
+#[tauri::command]
+async fn ensure_delete_tool() -> Result<bool, String> {
+    ensure_delete_tool_ready().await
+}
+
+#[tauri::command]
 fn confirm_app_close(app: AppHandle, state: State<ManagedState>) -> Result<(), String> {
     *state.pending_close_request.lock().map_err(lock_error)? = None;
     state.allow_window_close.store(true, Ordering::SeqCst);
@@ -169,6 +253,8 @@ pub fn run() {
             allow_window_close: AtomicBool::new(false),
         })
         .setup(|app| {
+            setup_tray(app)?;
+
             let startup_settings = {
                 let state = app.state::<ManagedState>();
                 let settings = state
@@ -194,49 +280,12 @@ pub fn run() {
         })
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {
-                let app = window.app_handle();
-                let state = app.state::<ManagedState>();
-
-                if state.allow_window_close.load(Ordering::SeqCst) {
-                    return;
-                }
-
-                let active_project_ids = state.runtime_manager.active_project_ids();
-                if active_project_ids.is_empty() {
-                    state.runtime_manager.stop_all_sync();
-                    state.allow_window_close.store(true, Ordering::SeqCst);
+                if should_allow_window_close(window.app_handle().clone()) {
                     return;
                 }
 
                 api.prevent_close();
-
-                let mut pending_close_request = match state.pending_close_request.lock() {
-                    Ok(value) => value,
-                    Err(_) => return,
-                };
-
-                if pending_close_request.is_some() {
-                    return;
-                }
-
-                let active_project_names = match state.store.lock() {
-                    Ok(store) => store
-                        .list_projects()
-                        .into_iter()
-                        .filter(|project| active_project_ids.iter().any(|id| id == &project.id))
-                        .map(|project| project.name)
-                        .take(3)
-                        .collect::<Vec<_>>(),
-                    Err(_) => Vec::new(),
-                };
-
-                let request = AppCloseRequest {
-                    active_project_count: active_project_ids.len(),
-                    active_project_names,
-                };
-
-                *pending_close_request = Some(request.clone());
-                let _ = window.emit("app-close-requested", request);
+                let _ = emit_app_close_request(&window.app_handle());
             }
         })
         .invoke_handler(tauri::generate_handler![
@@ -253,6 +302,10 @@ pub fn run() {
             open_project_directory,
             open_project_terminal,
             open_external,
+            minimize_app_to_tray,
+            ensure_delete_tool,
+            delete_project_node_modules,
+            reinstall_project_node_modules,
             confirm_app_close,
             cancel_app_close
         ])
@@ -264,6 +317,112 @@ pub fn run() {
                 state.runtime_manager.stop_all_sync();
             }
         });
+}
+
+fn setup_tray(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
+    let show_item = MenuItemBuilder::with_id("show", "显示面板").build(app)?;
+    let quit_item = MenuItemBuilder::with_id("quit", "退出软件").build(app)?;
+    let menu = MenuBuilder::new(app)
+        .items(&[&show_item, &quit_item])
+        .build()?;
+
+    let icon = app.default_window_icon().cloned();
+    let mut tray_builder = TrayIconBuilder::new()
+        .menu(&menu)
+        .show_menu_on_left_click(false)
+        .on_menu_event(|app: &AppHandle, event: tauri::menu::MenuEvent| match event.id().as_ref() {
+            "show" => {
+                let _ = show_main_window(app);
+            }
+            "quit" => {
+                if app.get_webview_window("main").is_some() {
+                    let _ = show_main_window(app);
+
+                    if should_allow_window_close(app.clone()) {
+                        app.exit(0);
+                    } else {
+                        let _ = emit_app_close_request(app);
+                    }
+                }
+            }
+            _ => {}
+        })
+        .on_tray_icon_event(|tray: &tauri::tray::TrayIcon, event: TrayIconEvent| {
+            if let TrayIconEvent::Click {
+                button: MouseButton::Left,
+                button_state: MouseButtonState::Up,
+                ..
+            } = event
+            {
+                let _ = show_main_window(tray.app_handle());
+            }
+        });
+
+    if let Some(icon) = icon {
+        tray_builder = tray_builder.icon(icon);
+    }
+
+    tray_builder.build(app)?;
+    Ok(())
+}
+
+fn show_main_window(app: &AppHandle) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window("main") {
+        window
+            .show()
+            .map_err(|error| format!("显示主窗口失败: {error}"))?;
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+    }
+
+    Ok(())
+}
+
+fn should_allow_window_close(app: AppHandle) -> bool {
+    let state = app.state::<ManagedState>();
+    state.allow_window_close.load(Ordering::SeqCst)
+}
+
+fn emit_app_close_request(app: &AppHandle) -> Result<(), String> {
+    let state = app.state::<ManagedState>();
+
+    let active_project_ids = state.runtime_manager.active_project_ids();
+    if active_project_ids.is_empty() {
+        state.runtime_manager.stop_all_sync();
+        state.allow_window_close.store(true, Ordering::SeqCst);
+        if let Some(window) = app.get_webview_window("main") {
+            window.close().map_err(|error| format!("关闭窗口失败: {error}"))?;
+        }
+        return Ok(());
+    }
+
+    let mut pending_close_request = state.pending_close_request.lock().map_err(lock_error)?;
+    if pending_close_request.is_some() {
+        return Ok(());
+    }
+
+    let active_project_names = state
+        .store
+        .lock()
+        .map_err(lock_error)?
+        .list_projects()
+        .into_iter()
+        .filter(|project| active_project_ids.iter().any(|id| id == &project.id))
+        .map(|project| project.name)
+        .take(3)
+        .collect::<Vec<_>>();
+
+    let request = AppCloseRequest {
+        active_project_count: active_project_ids.len(),
+        active_project_names,
+    };
+
+    *pending_close_request = Some(request.clone());
+    app
+        .emit("app-close-requested", request)
+        .map_err(|error| format!("发送退出确认失败: {error}"))?;
+
+    Ok(())
 }
 
 async fn run_project_autostart(app: AppHandle) {

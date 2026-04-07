@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+﻿import { useEffect, useRef, useState } from "react";
 import { FolderTree, Plus, Settings2 } from "lucide-react";
 import { DeleteProjectDialog } from "@/components/delete-project-dialog";
 import { ExitRunningProjectsDialog } from "@/components/exit-running-projects-dialog";
@@ -6,20 +6,26 @@ import { ProjectCard } from "@/components/project-card";
 import { ProjectFormDialog, type ProjectDraft } from "@/components/project-form-dialog";
 import { ProjectLogsDialog } from "@/components/project-logs-dialog";
 import { StartupSettingsDialog } from "@/components/startup-settings-dialog";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { desktopApi } from "@/lib/desktop";
 import { getDefaultErrorMessage } from "@/lib/ui-copy";
+import { toast } from "sonner";
 import {
+  type DependencyOperation,
+  type DependencyOperationEvent,
+  type DependencyOperationStatus,
   type AppCloseRequest,
+  buildRunCommand,
   DEFAULT_APP_STARTUP_SETTINGS,
   normalizeNodeVersion,
   type AppStartupSettings,
   type DesktopEnvironment,
   type ProjectConfig,
   type ProjectDirectoryInspection,
+  type ProjectPackageManager,
   type ProjectRuntime,
 } from "@/shared/contracts";
 
@@ -32,11 +38,19 @@ type Feedback = {
 type DraftSuggestionSnapshot = {
   name: string;
   startCommand: string;
+  packageManager: ProjectPackageManager | "";
+};
+
+type NormalizedFeedback = {
+  variant: Feedback["variant"];
+  title: string;
+  message: string;
 };
 
 const EMPTY_DRAFT_SUGGESTIONS: DraftSuggestionSnapshot = {
   name: "",
   startCommand: "",
+  packageManager: "",
 };
 
 function createEmptyProjectDraft(): ProjectDraft {
@@ -44,6 +58,7 @@ function createEmptyProjectDraft(): ProjectDraft {
     name: "",
     path: "",
     nodeVersion: "",
+    packageManager: "",
     startCommand: "",
     autoStartOnAppLaunch: false,
     autoOpenLocalUrlOnStart: false,
@@ -60,8 +75,44 @@ function createSuggestionSnapshot(
 ): DraftSuggestionSnapshot {
   return {
     name: inspection?.suggestedName ?? "",
-    startCommand: inspection?.recommendedStartCommand ?? "",
+    startCommand: "",
+    packageManager: "",
   };
+}
+
+function getRecommendedScriptName(inspection: ProjectDirectoryInspection | null) {
+  return (
+    inspection?.availableStartCommands.find((command) => command.recommended)?.scriptName ??
+    inspection?.availableStartCommands[0]?.scriptName ??
+    null
+  );
+}
+
+function getSuggestedPackageManager(
+  inspection: ProjectDirectoryInspection | null,
+  availablePackageManagers: ProjectPackageManager[]
+): ProjectPackageManager | "" {
+  const preferredPackageManager = inspection?.packageManager;
+  if (
+    preferredPackageManager &&
+    availablePackageManagers.includes(preferredPackageManager)
+  ) {
+    return preferredPackageManager;
+  }
+
+  return availablePackageManagers[0] ?? "";
+}
+
+function getSuggestedStartCommand(
+  inspection: ProjectDirectoryInspection | null,
+  packageManager: ProjectPackageManager | ""
+) {
+  const scriptName = getRecommendedScriptName(inspection);
+  if (!scriptName || !packageManager) {
+    return "";
+  }
+
+  return buildRunCommand(packageManager, scriptName);
 }
 
 function getErrorMessage(error: unknown) {
@@ -70,8 +121,89 @@ function getErrorMessage(error: unknown) {
     : getDefaultErrorMessage();
 }
 
+function getProjectNameFromFeedbackMessage(message: string) {
+  const trimmedMessage = message.trim();
+  if (!trimmedMessage) {
+    return "项目";
+  }
+
+  return trimmedMessage.split(/\s+/)[0] || "项目";
+}
+
+function normalizeFeedback(feedback: Feedback): NormalizedFeedback {
+  const projectName = getProjectNameFromFeedbackMessage(feedback.message);
+
+  if (feedback.title.includes("姝ｅ湪鍒犻櫎")) {
+    return {
+      variant: "default",
+      title: "正在删除依赖",
+      message: `${projectName} 的依赖正在删除，请稍候。`,
+    };
+  }
+
+  if (
+    feedback.title.includes("宸插垹闄") ||
+    feedback.title.toLowerCase().includes("node_modules")
+  ) {
+    return {
+      variant: "default",
+      title: "依赖已删除",
+      message: `${projectName} 的依赖目录已经删除。`,
+    };
+  }
+
+  if (feedback.title.includes("鍒犻櫎 node_modules")) {
+    return {
+      variant: "destructive",
+      title: "删除依赖失败",
+      message: feedback.message,
+    };
+  }
+
+  if (feedback.title.includes("姝ｅ湪閲嶈")) {
+    return {
+      variant: "default",
+      title: "正在重装依赖",
+      message: `${projectName} 的依赖正在重装，请稍候。`,
+    };
+  }
+
+  if (feedback.title.includes("渚濊禆宸查噸瑁")) {
+    return {
+      variant: "default",
+      title: "依赖已重装",
+      message: `${projectName} 的依赖已经重新安装完成。`,
+    };
+  }
+
+  if (feedback.title.includes("閲嶈渚濊禆澶辫触")) {
+    return {
+      variant: "destructive",
+      title: "重装依赖失败",
+      message: feedback.message,
+    };
+  }
+
+  return {
+    variant: feedback.variant,
+    title: feedback.title,
+    message: feedback.message,
+  };
+}
+
 function isProjectRuntimeActive(status?: ProjectRuntime["status"]) {
   return status === "running" || status === "starting";
+}
+
+function getDependencyOperationKey(
+  projectId: string,
+  operation: DependencyOperation
+) {
+  return `${operation}:${projectId}`;
+}
+
+function isDependencyOperationBusy(status?: DependencyOperationStatus) {
+  return status === "installingDeleteTool" || status === "running";
 }
 
 export function App() {
@@ -79,6 +211,8 @@ export function App() {
   const [runtimes, setRuntimes] = useState<Record<string, ProjectRuntime>>({});
   const [environment, setEnvironment] = useState<DesktopEnvironment>({
     installedNodeVersions: [],
+    availablePackageManagers: [],
+    rimrafInstalled: false,
     nvmHome: null,
   });
   const [isLoading, setIsLoading] = useState(true);
@@ -100,16 +234,37 @@ export function App() {
   const [isBrowsingPath, setIsBrowsingPath] = useState(false);
   const [isSavingStartupSettings, setIsSavingStartupSettings] = useState(false);
   const [isConfirmingAppClose, setIsConfirmingAppClose] = useState(false);
+  const [isMinimizingAppClose, setIsMinimizingAppClose] = useState(false);
   const [pathInspection, setPathInspection] = useState<ProjectDirectoryInspection | null>(
     null
   );
+  const [dependencyOperations, setDependencyOperations] = useState<
+    Record<string, DependencyOperationStatus>
+  >({});
   const [, setActionLocks] = useState<Record<string, boolean>>({});
   const draftSuggestionRef = useRef<DraftSuggestionSnapshot>(EMPTY_DRAFT_SUGGESTIONS);
   const cooldownTimersRef = useRef<Map<string, number>>(new Map());
   const actionLocksRef = useRef<Set<string>>(new Set());
+  const lastToastSignatureRef = useRef<string | null>(null);
 
   function hasInstalledNodeVersion(nodeVersion: string) {
     return environment.installedNodeVersions.includes(normalizeNodeVersion(nodeVersion));
+  }
+
+  function getDependencyOperationStatus(
+    projectId: string,
+    operation: DependencyOperation
+  ) {
+    return dependencyOperations[getDependencyOperationKey(projectId, operation)];
+  }
+
+  function isDependencyOperationLocked(
+    projectId: string,
+    operation: DependencyOperation
+  ) {
+    return isDependencyOperationBusy(
+      getDependencyOperationStatus(projectId, operation)
+    );
   }
 
   function isActionLocked(key: string) {
@@ -213,6 +368,16 @@ export function App() {
     }
 
     const nextSuggestions = createSuggestionSnapshot(inspection);
+    const suggestedPackageManager = getSuggestedPackageManager(
+      inspection,
+      environment.availablePackageManagers
+    );
+    const suggestedStartCommand = getSuggestedStartCommand(
+      inspection,
+      suggestedPackageManager
+    );
+    nextSuggestions.packageManager = suggestedPackageManager;
+    nextSuggestions.startCommand = suggestedStartCommand;
 
     setProjectDraft((current) => {
       if (current.id) {
@@ -227,6 +392,17 @@ export function App() {
         current.name !== nextSuggestions.name
       ) {
         nextDraft.name = nextSuggestions.name;
+        changed = true;
+      }
+
+      if (
+        shouldApplySuggestedValue(
+          current.packageManager,
+          draftSuggestionRef.current.packageManager
+        ) &&
+        current.packageManager !== nextSuggestions.packageManager
+      ) {
+        nextDraft.packageManager = nextSuggestions.packageManager;
         changed = true;
       }
 
@@ -267,6 +443,7 @@ export function App() {
       name: project.name,
       path: project.path,
       nodeVersion: project.nodeVersion,
+      packageManager: project.packageManager,
       startCommand: project.startCommand,
       autoStartOnAppLaunch: project.autoStartOnAppLaunch,
       autoOpenLocalUrlOnStart: project.autoOpenLocalUrlOnStart,
@@ -331,10 +508,96 @@ export function App() {
       }
     );
 
+    const unsubscribeDependencyOperation = desktopApi.subscribeDependencyOperation(
+      (event: DependencyOperationEvent) => {
+        if (!isMounted) {
+          return;
+        }
+
+        const operationKey = getDependencyOperationKey(
+          event.projectId,
+          event.operation
+        );
+        const toastId = `dependency-operation:${operationKey}`;
+
+        if (event.status === "installingDeleteTool") {
+          setDependencyOperations((current) => ({
+            ...current,
+            [operationKey]: event.status,
+          }));
+          toast.loading("正在安装删除工具", {
+            id: toastId,
+            description:
+              event.message ?? "未检测到 rimraf，正在全局安装删除工具。",
+            duration: Number.POSITIVE_INFINITY,
+          });
+          return;
+        }
+
+        if (event.status === "running") {
+          setDependencyOperations((current) => ({
+            ...current,
+            [operationKey]: event.status,
+          }));
+          toast.loading(
+            event.operation === "delete" ? "正在删除依赖" : "正在重装依赖",
+            {
+              id: toastId,
+              description:
+                event.message ??
+                (event.operation === "delete"
+                  ? `${event.projectName} 的依赖正在删除，请稍候。`
+                  : `${event.projectName} 的依赖正在重新安装，请稍候。`),
+              duration: Number.POSITIVE_INFINITY,
+            }
+          );
+          return;
+        }
+
+        setDependencyOperations((current) => {
+          if (!current[operationKey]) {
+            return current;
+          }
+
+          const next = { ...current };
+          delete next[operationKey];
+          return next;
+        });
+
+        void loadProjectData();
+
+        if (event.status === "success") {
+          toast.success(
+            event.operation === "delete" ? "依赖已删除" : "依赖已重装",
+            {
+              id: toastId,
+              description:
+                event.message ??
+                (event.operation === "delete"
+                  ? `${event.projectName} 的依赖目录已经删除。`
+                  : `${event.projectName} 的依赖已经重新安装完成。`),
+              duration: 3000,
+            }
+          );
+          return;
+        }
+
+        toast.error(
+          event.operation === "delete" ? "删除依赖失败" : "重装依赖失败",
+          {
+            id: toastId,
+            description: event.message ?? getDefaultErrorMessage(),
+            duration: 4000,
+          }
+        );
+      }
+    );
+
     return () => {
       isMounted = false;
       unsubscribe();
       unsubscribeAppCloseRequest();
+      unsubscribeDependencyOperation();
     };
   }, []);
 
@@ -347,6 +610,39 @@ export function App() {
       cooldownTimersRef.current.clear();
     };
   }, []);
+
+  useEffect(() => {
+    if (!feedback) {
+      return;
+    }
+
+    const normalizedFeedback = normalizeFeedback(feedback);
+    const signature = JSON.stringify(normalizedFeedback);
+
+    if (lastToastSignatureRef.current === signature) {
+      setFeedback(null);
+      return;
+    }
+
+    lastToastSignatureRef.current = signature;
+    window.setTimeout(() => {
+      if (lastToastSignatureRef.current === signature) {
+        lastToastSignatureRef.current = null;
+      }
+    }, 1200);
+
+    if (normalizedFeedback.variant === "destructive") {
+      toast.error(normalizedFeedback.title, {
+        description: normalizedFeedback.message,
+      });
+    } else {
+      toast.success(normalizedFeedback.title, {
+        description: normalizedFeedback.message,
+      });
+    }
+
+    setFeedback(null);
+  }, [feedback]);
 
   useEffect(() => {
     if (!isProjectDialogOpen) {
@@ -391,7 +687,12 @@ export function App() {
     }
 
     applyInspectionSuggestions(pathInspection);
-  }, [isProjectDialogOpen, pathInspection, projectDraft.id]);
+  }, [
+    isProjectDialogOpen,
+    pathInspection,
+    projectDraft.id,
+    environment.availablePackageManagers,
+  ]);
 
   async function handleSaveProject() {
     const currentProject = projectDraft.id
@@ -402,13 +703,20 @@ export function App() {
       name: projectDraft.name.trim(),
       path: projectDraft.path.trim(),
       nodeVersion: projectDraft.nodeVersion.trim(),
+      packageManager: projectDraft.packageManager,
       startCommand: projectDraft.startCommand.trim(),
       autoStartOnAppLaunch: projectDraft.autoStartOnAppLaunch,
       autoOpenLocalUrlOnStart: projectDraft.autoOpenLocalUrlOnStart,
     };
 
-    if (!draft.name || !draft.path || !draft.nodeVersion || !draft.startCommand) {
-      setFormError("请把项目名称、路径、Node 版本和启动命令填写完整。");
+    if (
+      !draft.name ||
+      !draft.path ||
+      !draft.nodeVersion ||
+      !draft.packageManager ||
+      !draft.startCommand
+    ) {
+      setFormError("请把项目名称、路径、Node 版本、包管理器和启动命令填写完整。");
       return;
     }
 
@@ -417,9 +725,10 @@ export function App() {
       isProjectRuntimeActive(runtimes[currentProject.id]?.status) &&
       (currentProject.path !== draft.path ||
         currentProject.nodeVersion !== draft.nodeVersion ||
+        currentProject.packageManager !== draft.packageManager ||
         currentProject.startCommand !== draft.startCommand)
     ) {
-      setFormError("项目正在运行中，请先停止后再修改路径、Node 版本或启动命令。");
+      setFormError("项目正在运行中，请先停止后再修改路径、Node 版本、包管理器或启动命令。");
       return;
     }
 
@@ -432,6 +741,7 @@ export function App() {
         name: draft.name,
         path: draft.path,
         nodeVersion: draft.nodeVersion,
+        packageManager: draft.packageManager,
         startCommand: draft.startCommand,
         autoStartOnAppLaunch: draft.autoStartOnAppLaunch,
         autoOpenLocalUrlOnStart: draft.autoOpenLocalUrlOnStart,
@@ -587,9 +897,81 @@ export function App() {
     }
   }
 
+  async function handleMinimizeAppClose() {
+    setIsMinimizingAppClose(true);
+    setAppCloseRequest(null);
+
+    try {
+      await desktopApi.minimizeAppToTray();
+    } finally {
+      setIsMinimizingAppClose(false);
+    }
+  }
+
   async function handleCancelAppClose() {
     setAppCloseRequest(null);
     await desktopApi.cancelAppClose();
+  }
+
+  function handlePackageManagerChange(packageManager: ProjectPackageManager) {
+    setProjectDraft((current) => {
+      const nextDraft = { ...current, packageManager };
+      if (
+        shouldApplySuggestedValue(
+          current.startCommand,
+          draftSuggestionRef.current.startCommand
+        )
+      ) {
+        nextDraft.startCommand = getSuggestedStartCommand(pathInspection, packageManager);
+      }
+      return nextDraft;
+    });
+
+    draftSuggestionRef.current = {
+      ...draftSuggestionRef.current,
+      packageManager,
+      startCommand: getSuggestedStartCommand(pathInspection, packageManager),
+    };
+  }
+
+  async function handleDeleteProjectDependencies(project: ProjectConfig) {
+    const inspection = await desktopApi.inspectProjectDirectory(project.path);
+
+    if (!inspection.hasNodeModules) {
+      toast.info("当前项目还没有安装依赖", {
+        description: `${project.name} 当前没有 node_modules，启动项目时会自动安装依赖。`,
+        duration: 3500,
+      });
+      return;
+    }
+
+    await handleDeleteProjectDependenciesToast(project);
+  }
+
+  async function handleDeleteProjectDependenciesToast(project: ProjectConfig) {
+    await runLockedAction(`delete-node-modules:${project.id}`, async () => {
+      try {
+        await desktopApi.deleteProjectNodeModules(project.id);
+      } catch (error) {
+        toast.error("删除依赖失败", {
+          description: getErrorMessage(error),
+          duration: 4000,
+        });
+      }
+    });
+  }
+
+  async function handleReinstallProjectDependenciesToast(project: ProjectConfig) {
+    await runLockedAction(`reinstall-node-modules:${project.id}`, async () => {
+      try {
+        await desktopApi.reinstallProjectNodeModules(project.id);
+      } catch (error) {
+        toast.error("重装依赖失败", {
+          description: getErrorMessage(error),
+          duration: 4000,
+        });
+      }
+    });
   }
 
   return (
@@ -637,16 +1019,6 @@ export function App() {
               </Button>
             </div>
           </header>
-
-          {feedback ? (
-            <Alert
-              variant={feedback.variant}
-              className="mt-4 border-white/10 bg-card/75 backdrop-blur-sm"
-            >
-              <AlertTitle>{feedback.title}</AlertTitle>
-              <AlertDescription>{feedback.message}</AlertDescription>
-            </Alert>
-          ) : null}
 
           <section className="mt-3 flex-1 rounded-[22px] border border-white/10 bg-card/60 p-2.5 shadow-2xl shadow-black/20 backdrop-blur-xl">
             {isLoading ? (
@@ -710,6 +1082,14 @@ export function App() {
                     isStopLocked={isActionLocked(`stop:${project.id}`)}
                     isEditLocked={isActionLocked(`edit:${project.id}`)}
                     isDeleteLocked={isActionLocked(`delete:${project.id}`)}
+                    isDeleteNodeModulesLocked={
+                      isActionLocked(`delete-node-modules:${project.id}`) ||
+                      isDependencyOperationLocked(project.id, "delete")
+                    }
+                    isReinstallNodeModulesLocked={
+                      isActionLocked(`reinstall-node-modules:${project.id}`) ||
+                      isDependencyOperationLocked(project.id, "reinstall")
+                    }
                     isTerminalLocked={isActionLocked(`terminal:${project.id}`)}
                     isDirectoryLocked={isActionLocked(`directory:${project.id}`)}
                     isAddressLocked={isActionLocked(`url:${project.id}`)}
@@ -730,6 +1110,12 @@ export function App() {
                         },
                         400
                       )
+                    }
+                    onDeleteNodeModules={() =>
+                      void handleDeleteProjectDependencies(project)
+                    }
+                    onReinstallNodeModules={() =>
+                      void handleReinstallProjectDependenciesToast(project)
                     }
                     onOpenTerminalOutput={() =>
                       void runLockedAction(
@@ -757,6 +1143,7 @@ export function App() {
         draft={projectDraft}
         errorMessage={formError}
         installedNodeVersions={environment.installedNodeVersions}
+        installedPackageManagers={environment.availablePackageManagers}
         isSubmitting={isSubmitting}
         isBrowsingPath={isBrowsingPath}
         nodeVersionInstalled={
@@ -764,6 +1151,7 @@ export function App() {
         }
         pathInspection={pathInspection}
         onDraftChange={setProjectDraft}
+        onPackageManagerChange={handlePackageManagerChange}
         onBrowsePath={() => void handleBrowseProjectPath()}
         onOpenChange={(nextOpen) => {
           setIsProjectDialogOpen(nextOpen);
@@ -815,13 +1203,17 @@ export function App() {
       <ExitRunningProjectsDialog
         request={appCloseRequest}
         isConfirming={isConfirmingAppClose}
+        isMinimizing={isMinimizingAppClose}
         onConfirm={() => void handleConfirmAppClose()}
+        onMinimize={() => void handleMinimizeAppClose()}
         onOpenChange={(open) => {
           if (!open) {
             void handleCancelAppClose();
           }
         }}
       />
+
+      <Toaster />
     </TooltipProvider>
   );
 }

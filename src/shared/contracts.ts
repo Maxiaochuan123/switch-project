@@ -26,6 +26,7 @@ export type ProjectConfig = {
   name: string;
   path: string;
   nodeVersion: string;
+  packageManager: ProjectPackageManager;
   startCommand: string;
   autoStartOnAppLaunch: boolean;
   autoOpenLocalUrlOnStart: boolean;
@@ -65,6 +66,8 @@ export type ProjectRuntime = {
 
 export type DesktopEnvironment = {
   installedNodeVersions: string[];
+  availablePackageManagers: ProjectPackageManager[];
+  rimrafInstalled: boolean;
   nvmHome: string | null;
 };
 
@@ -75,7 +78,7 @@ export type ProjectNodeVersionSource =
   | "package-engines"
   | null;
 
-export type ProjectPackageManager = "npm" | "pnpm" | "yarn" | null;
+export type ProjectPackageManager = "npm" | "pnpm" | "cnpm" | "yarn";
 
 export type ProjectCommandSuggestion = {
   scriptName: string;
@@ -87,11 +90,12 @@ export type ProjectDirectoryInspection = {
   exists: boolean;
   isDirectory: boolean;
   hasPackageJson: boolean;
+  hasNodeModules: boolean;
   suggestedName: string | null;
   recommendedNodeVersion: string | null;
   nodeVersionHint: string | null;
   nodeVersionSource: ProjectNodeVersionSource;
-  packageManager: ProjectPackageManager;
+  packageManager: ProjectPackageManager | null;
   recommendedStartCommand: string | null;
   availableStartCommands: ProjectCommandSuggestion[];
 };
@@ -106,6 +110,29 @@ export type AppCloseRequest = {
   activeProjectNames: string[];
 };
 
+export type DependencyOperation = "delete" | "reinstall";
+
+export type DependencyOperationStatus =
+  | "installingDeleteTool"
+  | "running"
+  | "success"
+  | "error";
+
+export type DependencyOperationEvent = {
+  projectId: string;
+  projectName: string;
+  operation: DependencyOperation;
+  status: DependencyOperationStatus;
+  message?: string;
+};
+
+export const PACKAGE_MANAGERS: ProjectPackageManager[] = [
+  "npm",
+  "pnpm",
+  "cnpm",
+  "yarn",
+];
+
 export const DEFAULT_APP_STARTUP_SETTINGS: AppStartupSettings = {
   openAtLogin: false,
   launchMinimizedOnLogin: false,
@@ -113,6 +140,22 @@ export const DEFAULT_APP_STARTUP_SETTINGS: AppStartupSettings = {
 
 export function normalizeNodeVersion(version: string) {
   return version.trim().replace(/^v/i, "");
+}
+
+export function buildRunCommand(packageManager: ProjectPackageManager, scriptName: string) {
+  return packageManager === "npm" || packageManager === "cnpm"
+    ? `${packageManager} run ${scriptName}`
+    : `${packageManager} ${scriptName}`;
+}
+
+export function buildInstallCommand(packageManager: ProjectPackageManager) {
+  return packageManager === "npm" || packageManager === "cnpm"
+    ? `${packageManager} install`
+    : `${packageManager} install`;
+}
+
+export function getPackageManagerLabel(packageManager: ProjectPackageManager) {
+  return packageManager;
 }
 
 export function normalizeAppStartupSettings(
@@ -141,9 +184,16 @@ export type DesktopApi = {
   openExternal: (url: string) => Promise<void>;
   getEnvironment: () => Promise<DesktopEnvironment>;
   browseProjectDirectory: (initialPath?: string) => Promise<string | null>;
+  minimizeAppToTray: () => Promise<void>;
+  ensureDeleteTool: () => Promise<boolean>;
+  deleteProjectNodeModules: (projectId: string) => Promise<void>;
+  reinstallProjectNodeModules: (projectId: string) => Promise<void>;
   copyText: (value: string) => void;
   subscribeRuntime: (listener: (runtime: ProjectRuntime) => void) => () => void;
   subscribeAppCloseRequest: (listener: (request: AppCloseRequest) => void) => () => void;
   confirmAppClose: () => Promise<void>;
   cancelAppClose: () => Promise<void>;
+  subscribeDependencyOperation: (
+    listener: (event: DependencyOperationEvent) => void
+  ) => () => void;
 };

@@ -16,7 +16,6 @@ function createTerminalText(runtime?: ProjectRuntime) {
   }
 
   return runtime.recentLogs
-    .filter((entry) => entry.level !== "system")
     .map((entry) => entry.message.trimEnd())
     .filter(Boolean)
     .join("\n");
@@ -34,14 +33,12 @@ export function ProjectLogsDialog({
 
   function scrollToBottom() {
     const container = scrollContainerRef.current;
-    const anchor = bottomAnchorRef.current;
-
     if (!container) {
       return;
     }
 
     container.scrollTop = container.scrollHeight;
-    anchor?.scrollIntoView({ block: "end" });
+    bottomAnchorRef.current?.scrollIntoView({ block: "end" });
   }
 
   useEffect(() => {
@@ -49,36 +46,15 @@ export function ProjectLogsDialog({
       return;
     }
 
-    const firstFrame = window.requestAnimationFrame(() => {
-      scrollToBottom();
-
-      window.requestAnimationFrame(() => {
-        scrollToBottom();
-      });
-    });
-
-    const settleTimer = window.setTimeout(() => {
-      scrollToBottom();
-    }, 120);
-
-    const lateTimer = window.setTimeout(() => {
-      scrollToBottom();
-    }, 320);
-
-    const interval = window.setInterval(() => {
-      scrollToBottom();
-    }, 80);
-
-    const stopIntervalTimer = window.setTimeout(() => {
-      window.clearInterval(interval);
-    }, 1400);
+    const timers = [
+      window.setTimeout(scrollToBottom, 0),
+      window.setTimeout(scrollToBottom, 80),
+      window.setTimeout(scrollToBottom, 180),
+      window.setTimeout(scrollToBottom, 360),
+    ];
 
     return () => {
-      window.cancelAnimationFrame(firstFrame);
-      window.clearTimeout(settleTimer);
-      window.clearTimeout(lateTimer);
-      window.clearTimeout(stopIntervalTimer);
-      window.clearInterval(interval);
+      timers.forEach((timer) => window.clearTimeout(timer));
     };
   }, [open, terminalText]);
 

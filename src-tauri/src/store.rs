@@ -5,7 +5,10 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
-use crate::contracts::{normalize_node_version, AppStartupSettings, ProjectConfig};
+use crate::contracts::{
+    default_project_package_manager, normalize_node_version, AppStartupSettings, ProjectConfig,
+    ProjectPackageManager,
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -32,6 +35,7 @@ struct LegacyProjectConfig {
     name: Option<String>,
     path: Option<String>,
     node_version: Option<String>,
+    package_manager: Option<ProjectPackageManager>,
     start_command: Option<String>,
     auto_start_on_app_launch: Option<bool>,
     auto_open_local_url_on_start: Option<bool>,
@@ -182,6 +186,9 @@ fn migrate_legacy_store(path: &Path) -> StoreData {
                     name: project.name.unwrap_or_default(),
                     path: project.path.unwrap_or_default(),
                     node_version: project.node_version.unwrap_or_default(),
+                    package_manager: project
+                        .package_manager
+                        .unwrap_or_else(default_project_package_manager),
                     start_command: project.start_command.unwrap_or_default(),
                     auto_start_on_app_launch: project
                         .auto_start_on_app_launch
@@ -214,10 +221,30 @@ fn normalize_project(project: ProjectConfig) -> Result<ProjectConfig, String> {
         name: project.name.trim().to_string(),
         path: absolute_path,
         node_version: normalize_node_version(&project.node_version),
+        package_manager: infer_project_package_manager(&project),
         start_command: project.start_command.trim().to_string(),
         auto_start_on_app_launch: project.auto_start_on_app_launch,
         auto_open_local_url_on_start: project.auto_open_local_url_on_start,
     })
+}
+
+fn infer_project_package_manager(project: &ProjectConfig) -> ProjectPackageManager {
+    let command_name = project
+        .start_command
+        .split_whitespace()
+        .next()
+        .unwrap_or_default()
+        .trim()
+        .trim_matches('"')
+        .to_ascii_lowercase();
+
+    match command_name.as_str() {
+        "pnpm" => ProjectPackageManager::Pnpm,
+        "cnpm" => ProjectPackageManager::Cnpm,
+        "yarn" => ProjectPackageManager::Yarn,
+        "npm" => ProjectPackageManager::Npm,
+        _ => project.package_manager,
+    }
 }
 
 fn make_absolute_path(raw_path: &str) -> Result<String, String> {

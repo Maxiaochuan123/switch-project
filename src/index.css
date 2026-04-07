@@ -119,3 +119,50 @@ body::before {
   background-size: 28px 28px;
   mask-image: linear-gradient(180deg, rgba(255, 255, 255, 0.65), transparent 88%);
 }
+
+@keyframes border-rotate {
+  from {
+    transform: translate(-50%, -50%) rotate(0deg);
+  }
+  to {
+    transform: translate(-50%, -50%) rotate(360deg);
+  }
+}
+
+.running-marquee {
+  position: relative;
+  z-index: 0;
+  overflow: hidden;
+}
+
+.running-marquee::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 200%;
+  height: 200%;
+  background: conic-gradient(
+    from 0deg,
+    transparent 0deg,
+    transparent 150deg,
+    oklch(0.72 0.14 190) 180deg,
+    oklch(0.68 0.18 280) 200deg,
+    transparent 230deg,
+    transparent 360deg
+  );
+  animation: border-rotate 3s linear infinite;
+  z-index: -2;
+  pointer-events: none;
+}
+
+.running-marquee::after {
+  content: "";
+  position: absolute;
+  inset: 1px;
+  background: inherit;
+  border-radius: inherit;
+  z-index: -1;
+  pointer-events: none;
+}
+

@@ -7,15 +7,15 @@ use semver::{Version, VersionReq};
 use serde::Deserialize;
 
 use crate::contracts::{
-    normalize_node_version, ProjectCommandSuggestion, ProjectDirectoryInspection,
-    ProjectNodeVersionSource, ProjectPackageManager,
+    build_run_command as build_package_run_command, normalize_node_version, ProjectCommandSuggestion,
+    ProjectDirectoryInspection, ProjectNodeVersionSource, ProjectPackageManager,
 };
+use crate::package_managers::detect_project_package_manager;
 
 const SCRIPT_PRIORITY: [&str; 2] = ["dev", "start"];
 
 #[derive(Debug, Deserialize)]
 struct PackageJsonShape {
-    name: Option<String>,
     scripts: Option<std::collections::HashMap<String, String>>,
     engines: Option<PackageJsonEngines>,
     volta: Option<PackageJsonVolta>,
@@ -54,7 +54,8 @@ pub fn inspect_project_directory(
     let package_json_path = resolved_path.join("package.json");
     let package_json = read_json_file::<PackageJsonShape>(&package_json_path);
     let has_package_json = package_json.is_some();
-    let package_manager = detect_package_manager(&resolved_path);
+    let has_node_modules = resolved_path.join("node_modules").exists();
+    let package_manager = detect_project_package_manager(&resolved_path);
     let node_recommendation =
         resolve_node_recommendation(&resolved_path, package_json.as_ref(), installed_node_versions);
     let available_start_commands =
@@ -64,10 +65,8 @@ pub fn inspect_project_directory(
         exists: true,
         is_directory: true,
         has_package_json,
-        suggested_name: Some(resolve_suggested_name(
-            &resolved_path,
-            package_json.as_ref().and_then(|value| value.name.as_deref()),
-        )),
+        has_node_modules,
+        suggested_name: Some(resolve_suggested_name(&resolved_path)),
         recommended_node_version: node_recommendation.version,
         node_version_hint: node_recommendation.hint,
         node_version_source: node_recommendation.source,
@@ -89,6 +88,7 @@ fn empty_inspection(
         exists,
         is_directory,
         has_package_json,
+        has_node_modules: false,
         suggested_name: None,
         recommended_node_version: None,
         node_version_hint: None,
@@ -116,29 +116,10 @@ fn read_node_version_file(path: &Path) -> Option<String> {
         .map(str::to_string)
 }
 
-fn resolve_suggested_name(path: &Path, package_name: Option<&str>) -> String {
-    if let Some(name) = package_name.map(str::trim).filter(|value| !value.is_empty()) {
-        return name
-            .strip_prefix('@')
-            .and_then(|value| value.split_once('/').map(|(_, tail)| tail.to_string()))
-            .unwrap_or_else(|| name.to_string());
-    }
-
+fn resolve_suggested_name(path: &Path) -> String {
     path.file_name()
         .map(|value| value.to_string_lossy().to_string())
         .unwrap_or_else(|| "project".to_string())
-}
-
-fn detect_package_manager(path: &Path) -> ProjectPackageManager {
-    if path.join("pnpm-lock.yaml").exists() {
-        return ProjectPackageManager::Pnpm;
-    }
-
-    if path.join("yarn.lock").exists() {
-        return ProjectPackageManager::Yarn;
-    }
-
-    ProjectPackageManager::Npm
 }
 
 fn resolve_node_recommendation(
@@ -267,17 +248,9 @@ fn build_command_suggestions(
 
             Some(ProjectCommandSuggestion {
                 script_name: (*script_name).to_string(),
-                command: build_run_command(script_name, package_manager),
+                command: build_package_run_command(package_manager, script_name),
                 recommended: index == 0,
             })
         })
         .collect()
-}
-
-fn build_run_command(script_name: &str, package_manager: ProjectPackageManager) -> String {
-    match package_manager {
-        ProjectPackageManager::Pnpm => format!("pnpm {script_name}"),
-        ProjectPackageManager::Yarn => format!("yarn {script_name}"),
-        ProjectPackageManager::Npm => format!("npm run {script_name}"),
-    }
 }

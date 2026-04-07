@@ -2,8 +2,10 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ExternalLink,
   FolderOpen,
+  LoaderCircle,
   Pencil,
   Play,
+  RefreshCw,
   Settings2,
   Square,
   TerminalSquare,
@@ -25,11 +27,15 @@ type ProjectCardProps = {
   isStopLocked: boolean;
   isEditLocked: boolean;
   isDeleteLocked: boolean;
+  isDeleteNodeModulesLocked: boolean;
+  isReinstallNodeModulesLocked: boolean;
   isTerminalLocked: boolean;
   isDirectoryLocked: boolean;
   isAddressLocked: boolean;
   onEdit: () => void;
   onDelete: () => void;
+  onDeleteNodeModules: () => void;
+  onReinstallNodeModules: () => void;
   onOpenTerminalOutput: () => void;
   onStart: () => void;
   onStop: () => void;
@@ -63,7 +69,7 @@ function getTerminalPreview(logs: ProjectLogEntry[] | undefined) {
         .map((line) => line.trim())
         .filter(Boolean)
     )
-    .slice(-4);
+    .slice(-10);
 }
 
 export function ProjectCard({
@@ -74,14 +80,18 @@ export function ProjectCard({
   isStopLocked,
   isEditLocked,
   isDeleteLocked,
+  isDeleteNodeModulesLocked,
+  isReinstallNodeModulesLocked,
   isTerminalLocked,
   isDirectoryLocked,
   isAddressLocked,
   onDelete,
+  onDeleteNodeModules,
   onEdit,
   onOpenDirectory,
   onOpenTerminalOutput,
   onOpenUrl,
+  onReinstallNodeModules,
   onStart,
   onStop,
 }: ProjectCardProps) {
@@ -136,12 +146,27 @@ export function ProjectCard({
     onDelete();
   }
 
+  function handleDeleteDependencies() {
+    setMenuOpen(false);
+    onDeleteNodeModules();
+  }
+
+  function handleReinstallDependencies() {
+    setMenuOpen(false);
+    onReinstallNodeModules();
+  }
+
   return (
-    <Card className="self-start gap-0 overflow-hidden border-white/10 bg-[#171d2a]/94 py-0 shadow-lg shadow-black/20 backdrop-blur-sm">
-      <div className="border-b border-white/8 px-3.5 py-1.5">
+    <Card
+      className={cn(
+        "self-start gap-0 overflow-hidden border-white/10 bg-[#171d2a]/94 py-0 shadow-lg shadow-black/20 backdrop-blur-sm transition-all duration-500",
+        isBusy && "running-marquee !border-primary/30"
+      )}
+    >
+      <div className="border-b border-white/8 px-3.5 py-2">
         <div className="flex items-center justify-between gap-3">
-          <div className="min-w-0 flex items-center gap-1">
-            <div className="truncate text-[15px] font-semibold tracking-tight">
+          <div className="min-w-0 flex items-center gap-1.5">
+            <div className="truncate text-[15px] font-semibold tracking-tight text-foreground">
               {project.name}
             </div>
 
@@ -188,10 +213,10 @@ export function ProjectCard({
               </Tooltip>
 
               {menuOpen ? (
-                <div className="absolute top-7 right-0 z-20 min-w-36 rounded-xl border border-white/10 bg-[#111827]/96 p-1.5 shadow-2xl shadow-black/40 backdrop-blur-xl">
+                <div className="absolute top-7 right-0 z-20 min-w-40 rounded-xl border border-white/10 bg-[#111827]/96 p-1.5 shadow-2xl shadow-black/40 backdrop-blur-xl">
                   <button
                     type="button"
-                    className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-foreground transition-colors hover:bg-white/8 disabled:opacity-50"
+                    className="flex w-full items-center gap-2 whitespace-nowrap rounded-lg px-3 py-2 text-left text-sm text-foreground transition-colors hover:bg-white/8 disabled:opacity-50"
                     onClick={handleEdit}
                     disabled={isBusy || isEditLocked}
                   >
@@ -200,7 +225,33 @@ export function ProjectCard({
                   </button>
                   <button
                     type="button"
-                    className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-rose-100 transition-colors hover:bg-rose-500/10 disabled:opacity-50"
+                    className="flex w-full items-center gap-2 whitespace-nowrap rounded-lg px-3 py-2 text-left text-sm text-foreground transition-colors hover:bg-white/8 disabled:opacity-50"
+                    onClick={handleDeleteDependencies}
+                    disabled={isBusy || isDeleteNodeModulesLocked}
+                  >
+                    {isDeleteNodeModulesLocked ? (
+                      <LoaderCircle className="size-3.5 animate-spin" />
+                    ) : (
+                      <Trash2 className="size-3.5" />
+                    )}
+                    删除依赖
+                  </button>
+                  <button
+                    type="button"
+                    className="flex w-full items-center gap-2 whitespace-nowrap rounded-lg px-3 py-2 text-left text-sm text-foreground transition-colors hover:bg-white/8 disabled:opacity-50"
+                    onClick={handleReinstallDependencies}
+                    disabled={isBusy || isReinstallNodeModulesLocked}
+                  >
+                    {isReinstallNodeModulesLocked ? (
+                      <LoaderCircle className="size-3.5 animate-spin" />
+                    ) : (
+                      <RefreshCw className="size-3.5" />
+                    )}
+                    重装依赖
+                  </button>
+                  <button
+                    type="button"
+                    className="flex w-full items-center gap-2 whitespace-nowrap rounded-lg px-3 py-2 text-left text-sm text-rose-100 transition-colors hover:bg-rose-500/10 disabled:opacity-50"
                     onClick={handleDelete}
                     disabled={isBusy || isDeleteLocked}
                   >
@@ -214,8 +265,8 @@ export function ProjectCard({
         </div>
       </div>
 
-      <div className="px-3.5 py-1.5">
-        <div className="h-[6.2rem] rounded-xl border border-white/8 bg-[#101621] p-1.5">
+      <div className="px-3.5 py-2.5">
+        <div className="h-[8.5rem] rounded-xl border border-white/8 bg-[#101621] p-2.5">
           {showAddresses ? (
             <div className="flex h-full items-center">
               <div className="w-full space-y-1.5">
@@ -255,7 +306,7 @@ export function ProjectCard({
         </div>
       </div>
 
-      <div className="flex items-center justify-between gap-3 border-t border-white/8 px-3.5 py-1.5">
+      <div className="flex items-center justify-between gap-3 border-t border-white/8 px-3.5 py-2">
         <Button
           type="button"
           size="sm"

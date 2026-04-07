@@ -3,6 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import { disable, enable, isEnabled } from "@tauri-apps/plugin-autostart";
 import { open } from "@tauri-apps/plugin-dialog";
 import {
+  type DependencyOperationEvent,
   normalizeAppStartupSettings,
   type AppCloseRequest,
   type AppStartupSettings,
@@ -16,6 +17,7 @@ import {
 const EVENTS = {
   runtimeUpdate: "runtime-update",
   appCloseRequested: "app-close-requested",
+  dependencyOperation: "dependency-operation",
 } as const;
 
 async function invokeCommand<T>(command: string, payload?: Record<string, unknown>) {
@@ -68,6 +70,12 @@ export const desktopApi: DesktopApi = {
 
     return typeof selectedPath === "string" ? selectedPath : null;
   },
+  minimizeAppToTray: () => invokeCommand("minimize_app_to_tray"),
+  ensureDeleteTool: () => invokeCommand<boolean>("ensure_delete_tool"),
+  deleteProjectNodeModules: (projectId) =>
+    invokeCommand("delete_project_node_modules", { projectId }),
+  reinstallProjectNodeModules: (projectId) =>
+    invokeCommand("reinstall_project_node_modules", { projectId }),
   copyText: (value) => {
     void navigator.clipboard.writeText(value);
   },
@@ -91,6 +99,22 @@ export const desktopApi: DesktopApi = {
         listener(event.payload);
       }
     });
+
+    return () => {
+      disposed = true;
+      void unlistenPromise.then((unlisten) => unlisten());
+    };
+  },
+  subscribeDependencyOperation: (listener) => {
+    let disposed = false;
+    const unlistenPromise = listen<DependencyOperationEvent>(
+      EVENTS.dependencyOperation,
+      (event) => {
+        if (!disposed) {
+          listener(event.payload);
+        }
+      }
+    );
 
     return () => {
       disposed = true;

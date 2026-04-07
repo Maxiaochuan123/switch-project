@@ -26,13 +26,18 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
-import type { ProjectDirectoryInspection } from "@/shared/contracts";
+import type {
+  ProjectDirectoryInspection,
+  ProjectPackageManager,
+} from "@/shared/contracts";
+import { getPackageManagerLabel } from "@/shared/contracts";
 
 export type ProjectDraft = {
   id?: string;
   name: string;
   path: string;
   nodeVersion: string;
+  packageManager: ProjectPackageManager | "";
   startCommand: string;
   autoStartOnAppLaunch: boolean;
   autoOpenLocalUrlOnStart: boolean;
@@ -43,11 +48,13 @@ type ProjectFormDialogProps = {
   draft: ProjectDraft;
   errorMessage: string | null;
   installedNodeVersions: string[];
+  installedPackageManagers: ProjectPackageManager[];
   isSubmitting: boolean;
   isBrowsingPath: boolean;
   nodeVersionInstalled: boolean;
   pathInspection: ProjectDirectoryInspection | null;
   onDraftChange: Dispatch<SetStateAction<ProjectDraft>>;
+  onPackageManagerChange: (packageManager: ProjectPackageManager) => void;
   onBrowsePath: () => void;
   onOpenChange: (open: boolean) => void;
   onSubmit: () => void;
@@ -88,11 +95,13 @@ export function ProjectFormDialog({
   draft,
   errorMessage,
   installedNodeVersions,
+  installedPackageManagers,
   isSubmitting,
   isBrowsingPath,
   nodeVersionInstalled,
   pathInspection,
   onDraftChange,
+  onPackageManagerChange,
   onBrowsePath,
   onOpenChange,
   onSubmit,
@@ -155,7 +164,7 @@ export function ProjectFormDialog({
             <DialogHeader className="shrink-0 px-6 pt-6">
               <DialogTitle className="text-2xl font-semibold tracking-tight">{title}</DialogTitle>
               <DialogDescription>
-                先选择项目目录，系统会自动带出项目名称和启动命令，Node 版本由你手动选择。
+                先选择项目目录，系统会自动带出项目名称和启动命令，Node 版本与包管理器由你确认。
               </DialogDescription>
             </DialogHeader>
 
@@ -176,7 +185,7 @@ export function ProjectFormDialog({
                       <Input
                         id="project-path"
                         value={draft.path}
-                        placeholder="C:\\Users\\admin\\Desktop\\my-project"
+                        placeholder="输入项目路径或浏览选择"
                         onChange={(event) =>
                           onDraftChange((current) => ({
                             ...current,
@@ -202,7 +211,7 @@ export function ProjectFormDialog({
                     <Input
                       id="project-name"
                       value={draft.name}
-                      placeholder="例如：admin-front"
+                      placeholder="浏览上传后自动识别，或自定义名称"
                       onChange={(event) =>
                         onDraftChange((current) => ({
                           ...current,
@@ -229,7 +238,7 @@ export function ProjectFormDialog({
                 <section className="space-y-4 rounded-2xl border border-white/8 bg-black/10 p-4">
                   <div className="text-sm font-medium text-foreground">启动配置</div>
 
-                  <div className="grid gap-4 md:grid-cols-[14rem_minmax(0,1fr)]">
+                  <div className="grid gap-4 md:grid-cols-2">
                     <div className="space-y-2">
                       <FieldHeader label="Node 版本" />
                       <Select
@@ -255,24 +264,45 @@ export function ProjectFormDialog({
                     </div>
 
                     <div className="space-y-2">
-                      <FieldHeader htmlFor="start-command" label="启动命令" />
-                      <Input
-                        id="start-command"
-                        value={draft.startCommand}
-                        placeholder="例如：npm run dev"
-                        onChange={(event) =>
-                          onDraftChange((current) => ({
-                            ...current,
-                            startCommand: event.target.value,
-                          }))
+                      <FieldHeader label="包管理器" />
+                      <Select
+                        value={draft.packageManager || undefined}
+                        onValueChange={(value) =>
+                          onPackageManagerChange(value as ProjectPackageManager)
                         }
-                      />
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="请选择包管理器" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {installedPackageManagers.map((packageManager) => (
+                            <SelectItem key={packageManager} value={packageManager}>
+                              {getPackageManagerLabel(packageManager)}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <FieldHeader htmlFor="start-command" label="启动命令" />
+                    <Input
+                      id="start-command"
+                      value={draft.startCommand}
+                      placeholder="浏览上传后自动识别，或自定义启动命令"
+                      onChange={(event) =>
+                        onDraftChange((current) => ({
+                          ...current,
+                          startCommand: event.target.value,
+                        }))
+                      }
+                    />
                   </div>
 
                   {!nodeVersionInstalled && trimmedNodeVersion ? (
                     <Alert className="border-amber-400/20 bg-amber-400/10 text-amber-50">
-                      <AlertTitle>这个 Node 版本还没安装</AlertTitle>
+                      <AlertTitle>这个 Node 版本还没有安装</AlertTitle>
                       <AlertDescription>
                         先执行 {`nvm install ${trimmedNodeVersion}`}，安装完成后就能直接启动。
                       </AlertDescription>
