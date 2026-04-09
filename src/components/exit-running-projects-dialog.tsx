@@ -1,4 +1,4 @@
-import { AlertTriangle } from "lucide-react";
+﻿import { AlertTriangle } from "lucide-react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -52,21 +52,14 @@ export function ExitRunningProjectsDialog({
               {request.activeProjectNames.map((name) => (
                 <p key={name}>{name}</p>
               ))}
-              {request.activeProjectCount > request.activeProjectNames.length ? (
-                <p>还有其他项目…</p>
-              ) : null}
+              {request.activeProjectCount > request.activeProjectNames.length ? <p>还有其他项目...</p> : null}
             </div>
           </div>
         ) : null}
 
         <AlertDialogFooter>
           <AlertDialogCancel>取消</AlertDialogCancel>
-          <Button
-            type="button"
-            variant="outline"
-            onClick={onMinimize}
-            disabled={isMinimizing || isConfirming}
-          >
+          <Button type="button" variant="outline" onClick={onMinimize} disabled={isMinimizing || isConfirming}>
             {isMinimizing ? "最小化中..." : "最小化到托盘"}
           </Button>
           <AlertDialogAction

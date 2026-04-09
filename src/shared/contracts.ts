@@ -66,9 +66,31 @@ export type ProjectRuntime = {
 
 export type DesktopEnvironment = {
   installedNodeVersions: string[];
+  activeNodeVersion: string | null;
   availablePackageManagers: ProjectPackageManager[];
   rimrafInstalled: boolean;
   nvmHome: string | null;
+};
+
+export type BackendErrorCode =
+  | "unknown"
+  | "invalid-project"
+  | "project-not-found"
+  | "project-running"
+  | "project-path-missing"
+  | "node-version-missing"
+  | "package-manager-missing"
+  | "start-command-missing"
+  | "nvm-missing"
+  | "store-read-failed"
+  | "store-write-failed"
+  | "import-failed"
+  | "export-failed";
+
+export type BackendError = {
+  code: BackendErrorCode;
+  message: string;
+  detail?: string;
 };
 
 export type ProjectNodeVersionSource =
@@ -98,6 +120,27 @@ export type ProjectDirectoryInspection = {
   packageManager: ProjectPackageManager | null;
   recommendedStartCommand: string | null;
   availableStartCommands: ProjectCommandSuggestion[];
+  readiness: ProjectReadiness;
+};
+
+export type ProjectReadiness = {
+  nodeInstalled: boolean;
+  packageManagerAvailable: boolean;
+  hasNodeModules: boolean;
+  canStart: boolean;
+  warnings: string[];
+};
+
+export type ProjectDiagnosis = {
+  projectId: string;
+  projectName: string;
+  readiness: ProjectReadiness;
+  pathExists: boolean;
+  hasPackageJson: boolean;
+  startCommandAvailable: boolean;
+  nodeVersion: string;
+  packageManager: ProjectPackageManager;
+  startCommand: string;
 };
 
 export type AppStartupSettings = {
@@ -112,18 +155,30 @@ export type AppCloseRequest = {
 
 export type DependencyOperation = "delete" | "reinstall";
 
-export type DependencyOperationStatus =
-  | "installingDeleteTool"
-  | "running"
-  | "success"
-  | "error";
+export type OperationType =
+  | "dependency-delete"
+  | "dependency-reinstall"
+  | "node-install"
+  | "project-start-preflight"
+  | "project-diagnose";
 
-export type DependencyOperationEvent = {
-  projectId: string;
-  projectName: string;
-  operation: DependencyOperation;
-  status: DependencyOperationStatus;
+export type OperationStatus = "queued" | "running" | "success" | "error";
+
+export type OperationEvent = {
+  operationId: string;
+  type: OperationType;
+  status: OperationStatus;
+  title: string;
+  projectId?: string;
+  projectName?: string;
   message?: string;
+  error?: BackendError;
+};
+
+export type ImportProjectsResult = {
+  added: number;
+  updated: number;
+  skipped: number;
 };
 
 export const PACKAGE_MANAGERS: ProjectPackageManager[] = [
@@ -172,6 +227,7 @@ export type DesktopApi = {
   saveProject: (project: ProjectConfig) => Promise<void>;
   deleteProject: (projectId: string) => Promise<void>;
   listRuntimes: () => Promise<ProjectRuntime[]>;
+  diagnoseProject: (projectId: string) => Promise<ProjectDiagnosis>;
   inspectProjectDirectory: (
     projectPath: string
   ) => Promise<ProjectDirectoryInspection>;
@@ -184,6 +240,9 @@ export type DesktopApi = {
   openExternal: (url: string) => Promise<void>;
   getEnvironment: () => Promise<DesktopEnvironment>;
   browseProjectDirectory: (initialPath?: string) => Promise<string | null>;
+  importProjects: (filePath: string) => Promise<ImportProjectsResult>;
+  exportProjects: (filePath: string) => Promise<void>;
+  installNodeVersion: (version: string) => Promise<void>;
   minimizeAppToTray: () => Promise<void>;
   ensureDeleteTool: () => Promise<boolean>;
   deleteProjectNodeModules: (projectId: string) => Promise<void>;
@@ -193,7 +252,7 @@ export type DesktopApi = {
   subscribeAppCloseRequest: (listener: (request: AppCloseRequest) => void) => () => void;
   confirmAppClose: () => Promise<void>;
   cancelAppClose: () => Promise<void>;
-  subscribeDependencyOperation: (
-    listener: (event: DependencyOperationEvent) => void
+  subscribeOperation: (
+    listener: (event: OperationEvent) => void
   ) => () => void;
 };

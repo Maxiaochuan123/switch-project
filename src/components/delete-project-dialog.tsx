@@ -1,4 +1,4 @@
-import { AlertTriangle } from "lucide-react";
+﻿import { AlertTriangle } from "lucide-react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -35,7 +35,7 @@ export function DeleteProjectDialog({
           <AlertDialogTitle>从面板中移除项目</AlertDialogTitle>
           <AlertDialogDescription>
             {project
-              ? `这会把「${project.name}」从面板中移除，但不会删除磁盘里的项目文件。`
+              ? `这会把“${project.name}”从面板中移除，但不会删除磁盘里的项目文件。`
               : "这会把当前项目从面板中移除，但不会删除磁盘里的项目文件。"}
           </AlertDialogDescription>
         </AlertDialogHeader>
@@ -49,11 +49,7 @@ export function DeleteProjectDialog({
 
         <AlertDialogFooter>
           <AlertDialogCancel>取消</AlertDialogCancel>
-          <AlertDialogAction
-            variant="destructive"
-            onClick={onConfirm}
-            disabled={isDeleting}
-          >
+          <AlertDialogAction variant="destructive" onClick={onConfirm} disabled={isDeleting}>
             {isDeleting ? "移除中..." : "移除项目"}
           </AlertDialogAction>
         </AlertDialogFooter>

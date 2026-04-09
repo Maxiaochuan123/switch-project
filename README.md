@@ -11,14 +11,16 @@ Recommended setup on Windows with `nvm-windows`:
 ```powershell
 nvm install 24.14.1
 nvm use 24.14.1
-npm install
-npm start
+pnpm install
+pnpm dev
 ```
 
 The repository baseline is also declared in:
 
 - `.nvmrc`
 - `package.json > engines`
+
+If `pnpm dev` reports that the Node version is wrong, even after `nvm use`, close the current terminal and open a new one before retrying.
 
 ## Important Version Rule
 
@@ -40,12 +42,13 @@ As long as those versions are installed locally with `nvm-windows`, the panel ca
 ## Commands
 
 ```powershell
-npm start
-npm run lint
-npm run package
+pnpm dev
+pnpm run lint
+pnpm run web:build
+pnpm run build
 ```
 
 ## Notes
 
-- `npm run package` may fail if Electron Forge cannot download packaging assets due to network or TLS issues.
+- `pnpm run build` may fail if Tauri bundling dependencies or signing tools are missing on the current machine.
 - The panel injects the configured Node version into the launched process instead of relying on a global `nvm use` before every project start.

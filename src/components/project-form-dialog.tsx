@@ -1,10 +1,9 @@
-import {
-  useEffect,
-  useState,
-  type Dispatch,
-  type SetStateAction,
-} from "react";
-import { CircleAlert, FolderOpen, Package, X } from "lucide-react";
+import { useEffect, useMemo } from "react";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { Controller, useForm } from "react-hook-form";
+import { z } from "zod";
+import { AlertTriangle, Info, LoaderCircle } from "lucide-react";
+import { DropzoneField } from "@/components/dropzone-field";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
@@ -26,62 +25,89 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
-import type {
-  ProjectDirectoryInspection,
-  ProjectPackageManager,
+import type { ProjectDraft } from "@/features/project-panel/project-draft";
+import {
+  getPackageManagerLabel,
+  normalizeNodeVersion,
+  type ProjectDirectoryInspection,
+  type ProjectPackageManager,
 } from "@/shared/contracts";
-import { getPackageManagerLabel } from "@/shared/contracts";
+import { selectBestAvailableNodeVersion } from "@/features/project-panel/project-draft";
 
-export type ProjectDraft = {
-  id?: string;
-  name: string;
-  path: string;
-  nodeVersion: string;
-  packageManager: ProjectPackageManager | "";
-  startCommand: string;
-  autoStartOnAppLaunch: boolean;
-  autoOpenLocalUrlOnStart: boolean;
-};
+const projectDraftSchema = z.object({
+  name: z.string().trim().min(1, "请输入项目名称"),
+  path: z.string().trim().min(1, "请选择项目目录"),
+  nodeVersion: z.string().trim().min(1, "请选择 Node 版本"),
+  packageManager: z.string().trim().min(1, "请选择包管理器"),
+  startCommand: z.string().trim().min(1, "请输入启动命令"),
+  autoStartOnAppLaunch: z.boolean(),
+  autoOpenLocalUrlOnStart: z.boolean(),
+});
+
+type ProjectDraftFormValues = z.infer<typeof projectDraftSchema>;
 
 type ProjectFormDialogProps = {
   open: boolean;
   draft: ProjectDraft;
-  errorMessage: string | null;
+  submitErrorMessage: string | null;
   installedNodeVersions: string[];
+  activeNodeVersion: string | null;
   installedPackageManagers: ProjectPackageManager[];
   isSubmitting: boolean;
-  isBrowsingPath: boolean;
-  nodeVersionInstalled: boolean;
+  isInspectingProject: boolean;
+  inspectionNotice: "idle" | "success" | "error";
+  dropzoneError: string;
   pathInspection: ProjectDirectoryInspection | null;
-  onDraftChange: Dispatch<SetStateAction<ProjectDraft>>;
+  isInstallingNodeVersion: boolean;
   onPackageManagerChange: (packageManager: ProjectPackageManager) => void;
+  onInstallNodeVersion: (version: string) => void;
   onBrowsePath: () => void;
+  onPathSelected: (path: string) => void;
   onOpenChange: (open: boolean) => void;
-  onSubmit: () => void;
+  onSubmit: (draft: ProjectDraft) => void;
 };
 
-type SettingSwitchRowProps = {
-  title: string;
-  description: string;
-  checked: boolean;
-  onCheckedChange: (checked: boolean) => void;
-};
-
-function FieldHeader({ label, htmlFor }: { label: string; htmlFor?: string }) {
-  return <Label htmlFor={htmlFor}>{label}</Label>;
+function FieldLabel({
+  htmlFor,
+  label,
+  required,
+}: {
+  htmlFor?: string;
+  label: string;
+  required?: boolean;
+}) {
+  return (
+    <Label htmlFor={htmlFor} className="text-sm font-medium text-foreground">
+      {label}
+      {required ? <span className="ml-1 text-rose-300">*</span> : null}
+    </Label>
+  );
 }
 
-function SettingSwitchRow({
+function FieldError({ message }: { message?: string }) {
+  if (!message) {
+    return null;
+  }
+
+  return <p className="text-xs text-rose-300">{message}</p>;
+}
+
+function SettingsRow({
   title,
   description,
   checked,
   onCheckedChange,
-}: SettingSwitchRowProps) {
+}: {
+  title: string;
+  description: string;
+  checked: boolean;
+  onCheckedChange: (checked: boolean) => void;
+}) {
   return (
     <div className="rounded-2xl border border-white/8 bg-black/10 p-4">
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0 flex-1">
-          <div className="font-medium text-foreground">{title}</div>
+          <div className="text-sm font-medium text-foreground">{title}</div>
           <p className="mt-2 text-sm leading-6 text-muted-foreground">{description}</p>
         </div>
         <Switch checked={checked} onCheckedChange={onCheckedChange} />
@@ -93,264 +119,387 @@ function SettingSwitchRow({
 export function ProjectFormDialog({
   open,
   draft,
-  errorMessage,
+  submitErrorMessage,
   installedNodeVersions,
+  activeNodeVersion,
   installedPackageManagers,
   isSubmitting,
-  isBrowsingPath,
-  nodeVersionInstalled,
+  isInspectingProject,
+  inspectionNotice,
+  dropzoneError,
   pathInspection,
-  onDraftChange,
+  isInstallingNodeVersion,
   onPackageManagerChange,
+  onInstallNodeVersion,
   onBrowsePath,
+  onPathSelected,
   onOpenChange,
   onSubmit,
 }: ProjectFormDialogProps) {
-  const [visibleErrorMessage, setVisibleErrorMessage] = useState<string | null>(null);
-  const trimmedPath = draft.path.trim();
-  const trimmedNodeVersion = draft.nodeVersion.trim();
-  const title = draft.id ? "编辑项目" : "新增项目";
+  const formId = draft.id ? "edit-project-form" : "create-project-form";
+
+  const form = useForm<ProjectDraftFormValues>({
+    resolver: zodResolver(projectDraftSchema),
+    defaultValues: {
+      name: draft.name,
+      path: draft.path,
+      nodeVersion: draft.nodeVersion,
+      packageManager: draft.packageManager,
+      startCommand: draft.startCommand,
+      autoStartOnAppLaunch: draft.autoStartOnAppLaunch,
+      autoOpenLocalUrlOnStart: draft.autoOpenLocalUrlOnStart,
+    },
+  });
 
   useEffect(() => {
-    if (!open) {
-      setVisibleErrorMessage(null);
+    form.reset({
+      name: draft.name,
+      path: draft.path,
+      nodeVersion: draft.nodeVersion,
+      packageManager: draft.packageManager,
+      startCommand: draft.startCommand,
+      autoStartOnAppLaunch: draft.autoStartOnAppLaunch,
+      autoOpenLocalUrlOnStart: draft.autoOpenLocalUrlOnStart,
+    });
+  }, [draft, form]);
+
+  const watchedPath = form.watch("path");
+  const watchedNodeVersion = form.watch("nodeVersion");
+  const watchedPackageManager = form.watch("packageManager");
+
+  const autoSelectedNodeVersion = useMemo(
+    () =>
+      selectBestAvailableNodeVersion(
+        pathInspection?.nodeVersionHint ?? pathInspection?.recommendedNodeVersion,
+        installedNodeVersions,
+        activeNodeVersion
+      ),
+    [
+      activeNodeVersion,
+      installedNodeVersions,
+      pathInspection?.nodeVersionHint,
+      pathInspection?.recommendedNodeVersion,
+    ]
+  );
+
+  useEffect(() => {
+    if (isInspectingProject) {
       return;
     }
 
-    if (!errorMessage) {
-      setVisibleErrorMessage(null);
+    const currentValue = form.getValues("nodeVersion").trim();
+    if (currentValue || !autoSelectedNodeVersion) {
       return;
     }
 
-    setVisibleErrorMessage(errorMessage);
+    form.setValue("nodeVersion", autoSelectedNodeVersion, {
+      shouldDirty: false,
+      shouldTouch: false,
+      shouldValidate: true,
+    });
+  }, [autoSelectedNodeVersion, form, isInspectingProject]);
 
-    const timer = window.setTimeout(() => {
-      setVisibleErrorMessage((current) => (current === errorMessage ? null : current));
-    }, 3200);
+  const installTargetVersion =
+    pathInspection?.nodeVersionHint ??
+    pathInspection?.recommendedNodeVersion ??
+    watchedNodeVersion ??
+    "";
 
-    return () => {
-      window.clearTimeout(timer);
-    };
-  }, [errorMessage, open]);
+  const isInstallTargetMissing =
+    Boolean(installTargetVersion) &&
+    !installedNodeVersions.some(
+      (version) => normalizeNodeVersion(version) === normalizeNodeVersion(installTargetVersion)
+    );
+
+  const shouldShowInstallButton =
+    Boolean(installTargetVersion) &&
+    watchedNodeVersion.trim().length === 0 &&
+    isInstallTargetMissing &&
+    !isInspectingProject;
+
+  const nodeVersionOptions = useMemo(() => {
+    const options = [...installedNodeVersions];
+
+    if (
+      watchedNodeVersion &&
+      !options.some(
+        (version) => normalizeNodeVersion(version) === normalizeNodeVersion(watchedNodeVersion)
+      )
+    ) {
+      options.unshift(watchedNodeVersion);
+    }
+
+    return options;
+  }, [installedNodeVersions, watchedNodeVersion]);
+
+  const packageManagerOptions = useMemo<{ value: ProjectPackageManager; label: string }[]>(() => {
+    const options: { value: ProjectPackageManager; label: string }[] =
+      installedPackageManagers.map((packageManager) => ({
+        value: packageManager,
+        label: getPackageManagerLabel(packageManager),
+      }));
+
+    if (
+      watchedPackageManager &&
+      !options.some((option) => option.value === watchedPackageManager)
+    ) {
+      options.unshift({
+        value: watchedPackageManager as ProjectPackageManager,
+        label: `${getPackageManagerLabel(watchedPackageManager as ProjectPackageManager)}（项目检测）`,
+      });
+    }
+
+    return options;
+  }, [installedPackageManagers, watchedPackageManager]);
+
+  const dialogTitle = draft.id ? "编辑项目" : "新增项目";
+  const submitLabel = draft.id ? "保存项目" : "创建项目";
+  const isFormDisabled = isSubmitting || isInspectingProject;
 
   return (
-    <>
-      {visibleErrorMessage ? (
-        <div className="pointer-events-none fixed top-5 right-5 z-[90] w-full max-w-sm px-4 sm:px-0">
-          <div className="pointer-events-auto flex items-start gap-3 rounded-2xl border border-rose-400/20 bg-[#181120]/96 px-4 py-3 text-rose-50 shadow-2xl shadow-black/45 backdrop-blur-xl">
-            <CircleAlert className="mt-0.5 size-4 shrink-0 text-rose-300" />
-            <div className="min-w-0 flex-1">
-              <div className="text-sm font-medium">保存失败</div>
-              <div className="mt-1 text-sm leading-6 text-rose-100/90">
-                {visibleErrorMessage}
-              </div>
-            </div>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-xs"
-              className="-mr-1 text-rose-100 hover:bg-white/10 hover:text-white"
-              onClick={() => setVisibleErrorMessage(null)}
-            >
-              <X className="size-3.5" />
-            </Button>
-          </div>
-        </div>
-      ) : null}
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent
+        className="grid max-h-[88vh] max-w-xl grid-rows-[auto_minmax(0,1fr)_auto] gap-0 overflow-hidden border-white/10 bg-[#0d1426]/95 p-0 backdrop-blur-xl"
+        onInteractOutside={(event) => event.preventDefault()}
+      >
+        <DialogHeader className="border-b border-white/8 px-6 py-5">
+          <DialogTitle className="text-2xl font-semibold tracking-tight">{dialogTitle}</DialogTitle>
+          <DialogDescription>
+            选择项目根目录后，系统会自动识别项目名称、包管理器、启动命令和推荐 Node 版本。
+          </DialogDescription>
+        </DialogHeader>
 
-      <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="max-h-[88vh] max-w-xl overflow-hidden border-0 bg-transparent p-0 shadow-none">
-          <div className="flex max-h-[88vh] flex-col rounded-[24px] border border-white/10 bg-[#0d1426]/95 backdrop-blur-xl">
-            <DialogHeader className="shrink-0 px-6 pt-6">
-              <DialogTitle className="text-2xl font-semibold tracking-tight">{title}</DialogTitle>
-              <DialogDescription>
-                先选择项目目录，系统会自动带出项目名称和启动命令，Node 版本与包管理器由你确认。
-              </DialogDescription>
-            </DialogHeader>
+        <ScrollArea className="min-h-0">
+          <form
+            id={formId}
+            onSubmit={form.handleSubmit((values) => onSubmit(values as ProjectDraft))}
+            className="space-y-5 px-6 py-5"
+          >
+              {submitErrorMessage ? (
+                <Alert variant="destructive" className="border-rose-500/20 bg-rose-500/10">
+                  <AlertTriangle className="size-4" />
+                  <AlertTitle>保存失败</AlertTitle>
+                  <AlertDescription>{submitErrorMessage}</AlertDescription>
+                </Alert>
+              ) : null}
 
-            <ScrollArea className="min-h-0 flex-1 px-6">
-              <form
-                className="space-y-5 pb-6 pt-5"
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  onSubmit();
-                }}
-              >
-                <section className="space-y-4 rounded-2xl border border-white/8 bg-black/10 p-4">
-                  <div className="text-sm font-medium text-foreground">基础信息</div>
+              <section className="space-y-4 rounded-2xl border border-white/8 bg-black/10 p-4">
+                <div className="text-sm font-medium text-foreground">基础信息</div>
+
+                <div className="space-y-2">
+                  <FieldLabel label="项目目录" required />
+                  <DropzoneField
+                    selectedPath={watchedPath}
+                    isLoading={isInspectingProject}
+                    dropzoneError={dropzoneError}
+                    onBrowse={onBrowsePath}
+                    onPathSelected={onPathSelected}
+                  />
+                  <input type="hidden" {...form.register("path")} />
+                  <FieldError message={form.formState.errors.path?.message} />
+                </div>
+
+                {inspectionNotice === "success" ? (
+                  <div className="flex items-center gap-2 rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-200">
+                    <Info className="size-3.5 shrink-0" />
+                    已为您自动填充配置，请检查是否需要调整。
+                  </div>
+                ) : null}
+
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div className="space-y-2">
+                    <FieldLabel htmlFor="project-name" label="项目名称" required />
+                    <Input
+                      id="project-name"
+                      placeholder="默认取文件夹名称，也可以手动修改"
+                      disabled={isFormDisabled}
+                      {...form.register("name")}
+                    />
+                    <FieldError message={form.formState.errors.name?.message} />
+                  </div>
 
                   <div className="space-y-2">
-                    <FieldHeader htmlFor="project-path" label="项目目录" />
-                    <div className="flex gap-2">
-                      <Input
-                        id="project-path"
-                        value={draft.path}
-                        placeholder="输入项目路径或浏览选择"
-                        onChange={(event) =>
-                          onDraftChange((current) => ({
-                            ...current,
-                            path: event.target.value,
-                          }))
-                        }
-                      />
+                    <FieldLabel label="包管理器" required />
+                    <Controller
+                      control={form.control}
+                      name="packageManager"
+                      render={({ field }) => (
+                        <Select
+                          value={field.value || undefined}
+                          onValueChange={(value) => {
+                            field.onChange(value);
+                            onPackageManagerChange(value as ProjectPackageManager);
+                          }}
+                          disabled={isFormDisabled}
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="请选择包管理器" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {packageManagerOptions.map((option) => (
+                              <SelectItem key={option.value} value={option.value}>
+                                {option.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      )}
+                    />
+                    <FieldError message={form.formState.errors.packageManager?.message} />
+                  </div>
+                </div>
+
+                {!pathInspection?.hasPackageJson && watchedPath.trim() && !isInspectingProject ? (
+                  <Alert className="border-amber-500/20 bg-amber-500/10 text-amber-50">
+                    <AlertTriangle className="size-4 text-amber-200" />
+                    <AlertTitle>当前目录里没有 package.json</AlertTitle>
+                    <AlertDescription>
+                      可以继续保存，但这通常说明你选中的不是项目根目录。
+                    </AlertDescription>
+                  </Alert>
+                ) : null}
+              </section>
+
+              <section className="space-y-4 rounded-2xl border border-white/8 bg-black/10 p-4">
+                <div className="text-sm font-medium text-foreground">启动配置</div>
+
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div className="space-y-2">
+                    <FieldLabel label="Node 版本" required />
+                    {shouldShowInstallButton ? (
                       <Button
                         type="button"
                         variant="outline"
-                        className="shrink-0"
-                        onClick={onBrowsePath}
-                        disabled={isBrowsingPath}
+                        className="w-full"
+                        onClick={() => onInstallNodeVersion(installTargetVersion)}
+                        disabled={isInstallingNodeVersion || isFormDisabled}
                       >
-                        <FolderOpen className="size-4" />
-                        {isBrowsingPath ? "选择中..." : "浏览"}
+                        {isInstallingNodeVersion ? (
+                          <LoaderCircle className="size-4 animate-spin" />
+                        ) : null}
+                        {isInstallingNodeVersion
+                          ? "安装中..."
+                          : `安装 Node v${normalizeNodeVersion(installTargetVersion)}`}
                       </Button>
-                    </div>
+                    ) : (
+                      <Controller
+                        control={form.control}
+                        name="nodeVersion"
+                        render={({ field }) => (
+                          <Select
+                            value={field.value || undefined}
+                            onValueChange={field.onChange}
+                            disabled={isFormDisabled}
+                          >
+                            <SelectTrigger>
+                              <SelectValue placeholder="请选择 Node 版本" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {nodeVersionOptions.map((version) => {
+                                const normalizedVersion = normalizeNodeVersion(version);
+                                const installed = installedNodeVersions.some(
+                                  (item) => normalizeNodeVersion(item) === normalizedVersion
+                                );
+
+                                return (
+                                  <SelectItem key={version} value={version}>
+                                    {installed
+                                      ? `v${normalizedVersion}`
+                                      : `v${normalizedVersion}（未安装）`}
+                                  </SelectItem>
+                                );
+                              })}
+                            </SelectContent>
+                          </Select>
+                        )}
+                      />
+                    )}
+                    <FieldError message={form.formState.errors.nodeVersion?.message} />
                   </div>
 
                   <div className="space-y-2">
-                    <FieldHeader htmlFor="project-name" label="项目名称" />
-                    <Input
-                      id="project-name"
-                      value={draft.name}
-                      placeholder="浏览上传后自动识别，或自定义名称"
-                      onChange={(event) =>
-                        onDraftChange((current) => ({
-                          ...current,
-                          name: event.target.value,
-                        }))
-                      }
-                    />
-                  </div>
-
-                  {trimmedPath &&
-                  pathInspection?.exists &&
-                  pathInspection.isDirectory &&
-                  !pathInspection.hasPackageJson ? (
-                    <Alert className="border-amber-400/20 bg-amber-400/10 text-amber-50">
-                      <Package className="size-4" />
-                      <AlertTitle>当前目录里没有 package.json</AlertTitle>
-                      <AlertDescription>
-                        可以继续保存，但这通常说明你选中的不是项目根目录。
-                      </AlertDescription>
-                    </Alert>
-                  ) : null}
-                </section>
-
-                <section className="space-y-4 rounded-2xl border border-white/8 bg-black/10 p-4">
-                  <div className="text-sm font-medium text-foreground">启动配置</div>
-
-                  <div className="grid gap-4 md:grid-cols-2">
-                    <div className="space-y-2">
-                      <FieldHeader label="Node 版本" />
-                      <Select
-                        value={draft.nodeVersion || undefined}
-                        onValueChange={(value) =>
-                          onDraftChange((current) => ({
-                            ...current,
-                            nodeVersion: value,
-                          }))
-                        }
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="请选择 Node 版本" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {installedNodeVersions.map((version) => (
-                            <SelectItem key={version} value={version}>
-                              v{version}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-
-                    <div className="space-y-2">
-                      <FieldHeader label="包管理器" />
-                      <Select
-                        value={draft.packageManager || undefined}
-                        onValueChange={(value) =>
-                          onPackageManagerChange(value as ProjectPackageManager)
-                        }
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="请选择包管理器" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {installedPackageManagers.map((packageManager) => (
-                            <SelectItem key={packageManager} value={packageManager}>
-                              {getPackageManagerLabel(packageManager)}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </div>
-
-                  <div className="space-y-2">
-                    <FieldHeader htmlFor="start-command" label="启动命令" />
+                    <FieldLabel htmlFor="start-command" label="启动命令" required />
                     <Input
                       id="start-command"
-                      value={draft.startCommand}
-                      placeholder="浏览上传后自动识别，或自定义启动命令"
-                      onChange={(event) =>
-                        onDraftChange((current) => ({
-                          ...current,
-                          startCommand: event.target.value,
-                        }))
-                      }
+                      placeholder="默认从 package.json 读取，也可以手动修改"
+                      disabled={isFormDisabled}
+                      {...form.register("startCommand")}
                     />
+                    <FieldError message={form.formState.errors.startCommand?.message} />
                   </div>
+                </div>
 
-                  {!nodeVersionInstalled && trimmedNodeVersion ? (
-                    <Alert className="border-amber-400/20 bg-amber-400/10 text-amber-50">
-                      <AlertTitle>这个 Node 版本还没有安装</AlertTitle>
-                      <AlertDescription>
-                        先执行 {`nvm install ${trimmedNodeVersion}`}，安装完成后就能直接启动。
-                      </AlertDescription>
-                    </Alert>
-                  ) : null}
-                </section>
+                {isInstallTargetMissing && !shouldShowInstallButton ? (
+                  <Alert className="border-amber-500/20 bg-amber-500/10 text-amber-50">
+                    <AlertTriangle className="size-4 text-amber-200" />
+                    <AlertTitle>当前缺少所需的 Node 版本</AlertTitle>
+                    <AlertDescription>
+                      {watchedNodeVersion
+                        ? `当前选择的是 Node v${normalizeNodeVersion(watchedNodeVersion)}，本机还没有安装。`
+                        : `项目建议使用 Node v${normalizeNodeVersion(installTargetVersion)}，本机还没有安装。`}
+                    </AlertDescription>
+                    <div className="mt-3">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => onInstallNodeVersion(installTargetVersion)}
+                        disabled={isInstallingNodeVersion}
+                      >
+                        {isInstallingNodeVersion ? (
+                          <LoaderCircle className="size-4 animate-spin" />
+                        ) : null}
+                        {isInstallingNodeVersion
+                          ? "安装中..."
+                          : `安装 Node v${normalizeNodeVersion(installTargetVersion)}`}
+                      </Button>
+                    </div>
+                  </Alert>
+                ) : null}
+              </section>
 
-                <section className="space-y-4 rounded-2xl border border-white/8 bg-black/10 p-4">
-                  <div className="text-sm font-medium text-foreground">启动行为</div>
-                  <div className="space-y-3">
-                    <SettingSwitchRow
-                      title="软件启动后自动启动项目"
-                      description="每次打开这个面板时，这个项目都会自动跟着启动。"
-                      checked={draft.autoStartOnAppLaunch}
-                      onCheckedChange={(checked) =>
-                        onDraftChange((current) => ({
-                          ...current,
-                          autoStartOnAppLaunch: checked,
-                        }))
-                      }
-                    />
-                    <SettingSwitchRow
-                      title="项目启动后自动打开本地地址"
-                      description="识别到 localhost 地址后，会自动在浏览器里打开一次。"
-                      checked={draft.autoOpenLocalUrlOnStart}
-                      onCheckedChange={(checked) =>
-                        onDraftChange((current) => ({
-                          ...current,
-                          autoOpenLocalUrlOnStart: checked,
-                        }))
-                      }
-                    />
-                  </div>
-                </section>
-              </form>
-            </ScrollArea>
+              <section className="space-y-4 rounded-2xl border border-white/8 bg-black/10 p-4">
+                <div className="text-sm font-medium text-foreground">启动行为</div>
 
-            <DialogFooter className="shrink-0 border-t border-white/8 px-6 py-4">
-              <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
-                取消
-              </Button>
-              <Button type="button" onClick={onSubmit} disabled={isSubmitting}>
-                {isSubmitting ? "保存中..." : "保存项目"}
-              </Button>
-            </DialogFooter>
-          </div>
-        </DialogContent>
-      </Dialog>
-    </>
+                <div className="space-y-3">
+                  <Controller
+                    control={form.control}
+                    name="autoStartOnAppLaunch"
+                    render={({ field }) => (
+                      <SettingsRow
+                        title="软件启动后自动启动项目"
+                        description="每次打开这个面板时，这个项目都会自动跟着启动。"
+                        checked={field.value}
+                        onCheckedChange={field.onChange}
+                      />
+                    )}
+                  />
+
+                  <Controller
+                    control={form.control}
+                    name="autoOpenLocalUrlOnStart"
+                    render={({ field }) => (
+                      <SettingsRow
+                        title="项目启动后自动打开本地地址"
+                        description="识别到 localhost 地址后，会自动在浏览器里打开一次。"
+                        checked={field.value}
+                        onCheckedChange={field.onChange}
+                      />
+                    )}
+                  />
+                </div>
+              </section>
+          </form>
+        </ScrollArea>
+
+          <DialogFooter className="border-t border-white/8 px-6 py-4">
+            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+              取消
+            </Button>
+            <Button type="submit" form={formId} disabled={isFormDisabled}>
+              {isSubmitting ? "保存中..." : isInspectingProject ? "识别中..." : submitLabel}
+            </Button>
+          </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

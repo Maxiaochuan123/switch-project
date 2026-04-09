@@ -1,10 +1,12 @@
 use std::{
-    env,
-    fs,
+    env, fs,
     path::{Path, PathBuf},
 };
 
 use crate::contracts::normalize_node_version;
+use tokio::process::Command;
+
+const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 pub fn resolve_nvm_home() -> Option<PathBuf> {
     let explicit = env::var("NVM_HOME").ok().map(PathBuf::from);
@@ -48,6 +50,66 @@ pub fn list_installed_node_versions() -> Vec<String> {
 
     versions.sort_by(compare_node_versions);
     versions
+}
+
+pub fn resolve_active_node_version() -> Option<String> {
+    let output = std::process::Command::new("node").arg("-v").output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+
+    let version = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let normalized = normalize_node_version(&version);
+    (!normalized.is_empty()).then_some(normalized)
+}
+
+pub async fn install_node_version(version: &str) -> Result<(), String> {
+    let normalized_version = normalize_node_version(version);
+    if normalized_version.trim().is_empty() {
+        return Err("Node 版本不能为空。".to_string());
+    }
+
+    if list_installed_node_versions()
+        .iter()
+        .any(|current| current == &normalized_version)
+    {
+        return Ok(());
+    }
+
+    let nvm_executable = resolve_nvm_executable()
+        .ok_or_else(|| "未检测到 nvm-windows，无法自动安装 Node 版本。".to_string())?;
+
+    let mut command = Command::new(nvm_executable);
+    command.arg("install").arg(&normalized_version);
+
+    #[cfg(target_os = "windows")]
+    command.creation_flags(CREATE_NO_WINDOW);
+
+    let output = command
+        .output()
+        .await
+        .map_err(|error| format!("安装 Node 版本失败: {error}"))?;
+
+    if output.status.success() {
+        return Ok(());
+    }
+
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+
+    Err(if !stderr.is_empty() {
+        format!("安装 Node 版本失败: {stderr}")
+    } else if !stdout.is_empty() {
+        format!("安装 Node 版本失败: {stdout}")
+    } else {
+        "安装 Node 版本失败。".to_string()
+    })
+}
+
+fn resolve_nvm_executable() -> Option<PathBuf> {
+    let nvm_home = resolve_nvm_home()?;
+    let executable = nvm_home.join("nvm.exe");
+    executable.exists().then_some(executable)
 }
 
 fn compare_node_versions(left: &String, right: &String) -> std::cmp::Ordering {

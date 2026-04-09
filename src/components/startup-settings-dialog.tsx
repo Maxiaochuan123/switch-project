@@ -1,4 +1,4 @@
-import type { Dispatch, SetStateAction } from "react";
+﻿import type { Dispatch, SetStateAction } from "react";
 import { LaptopMinimalCheck, Rocket } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -64,11 +64,14 @@ export function StartupSettingsDialog({
 }: StartupSettingsDialogProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-xl border-white/10 bg-[#0d1426]/95 p-6 backdrop-blur-xl">
+      <DialogContent
+        className="max-w-xl border-white/10 bg-[#0d1426]/95 p-6 backdrop-blur-xl"
+        onInteractOutside={(event) => {
+          event.preventDefault();
+        }}
+      >
         <DialogHeader className="space-y-2">
-          <DialogTitle className="text-2xl font-semibold tracking-tight">
-            启动设置
-          </DialogTitle>
+          <DialogTitle className="text-2xl font-semibold tracking-tight">启动设置</DialogTitle>
           <DialogDescription>
             这里只管理软件级设置，项目自己的自动启动行为在项目编辑弹窗里配置。
           </DialogDescription>
@@ -78,7 +81,7 @@ export function StartupSettingsDialog({
           <SettingsRow
             icon={Rocket}
             title="开机自动启动"
-            description="开启后，开机后会自动启动本软件。"
+            description="开启后，登录系统后会自动启动这个软件。"
             checked={settings.openAtLogin}
             onCheckedChange={(checked) =>
               onSettingsChange((current) => ({
@@ -89,8 +92,8 @@ export function StartupSettingsDialog({
           />
           <SettingsRow
             icon={LaptopMinimalCheck}
-            title="最小化显示"
-            description="开机自动启动时，最小化到托盘显示"
+            title="最小化到托盘"
+            description="开机自动启动时，窗口不直接显示，而是最小化到托盘。"
             checked={settings.launchMinimizedOnLogin}
             disabled={!settings.openAtLogin}
             onCheckedChange={(checked) =>

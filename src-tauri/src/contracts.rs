@@ -1,6 +1,33 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum BackendErrorCode {
+    Unknown,
+    InvalidProject,
+    ProjectNotFound,
+    ProjectRunning,
+    ProjectPathMissing,
+    NodeVersionMissing,
+    PackageManagerMissing,
+    StartCommandMissing,
+    NvmMissing,
+    StoreReadFailed,
+    StoreWriteFailed,
+    ImportFailed,
+    ExportFailed,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BackendError {
+    pub code: BackendErrorCode,
+    pub message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProjectConfig {
     pub id: String,
@@ -88,6 +115,7 @@ pub struct ProjectRuntime {
 #[serde(rename_all = "camelCase")]
 pub struct DesktopEnvironment {
     pub installed_node_versions: Vec<String>,
+    pub active_node_version: Option<String>,
     pub available_package_managers: Vec<ProjectPackageManager>,
     pub rimraf_installed: bool,
     pub nvm_home: Option<String>,
@@ -102,7 +130,7 @@ pub enum ProjectNodeVersionSource {
     PackageEngines,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum ProjectPackageManager {
     Npm,
@@ -134,6 +162,32 @@ pub struct ProjectDirectoryInspection {
     pub recommended_start_command: Option<String>,
     #[serde(default)]
     pub available_start_commands: Vec<ProjectCommandSuggestion>,
+    pub readiness: ProjectReadiness,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectReadiness {
+    pub node_installed: bool,
+    pub package_manager_available: bool,
+    pub has_node_modules: bool,
+    pub can_start: bool,
+    #[serde(default)]
+    pub warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectDiagnosis {
+    pub project_id: String,
+    pub project_name: String,
+    pub readiness: ProjectReadiness,
+    pub path_exists: bool,
+    pub has_package_json: bool,
+    pub start_command_available: bool,
+    pub node_version: String,
+    pub package_manager: ProjectPackageManager,
+    pub start_command: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -169,9 +223,19 @@ pub enum DependencyOperation {
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub enum DependencyOperationStatus {
-    InstallingDeleteTool,
+#[serde(rename_all = "kebab-case")]
+pub enum OperationType {
+    DependencyDelete,
+    DependencyReinstall,
+    NodeInstall,
+    ProjectStartPreflight,
+    ProjectDiagnose,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum OperationStatus {
+    Queued,
     Running,
     Success,
     Error,
@@ -179,13 +243,28 @@ pub enum DependencyOperationStatus {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct DependencyOperationEvent {
-    pub project_id: String,
-    pub project_name: String,
-    pub operation: DependencyOperation,
-    pub status: DependencyOperationStatus,
+pub struct OperationEvent {
+    pub operation_id: String,
+    #[serde(rename = "type")]
+    pub operation_type: OperationType,
+    pub status: OperationStatus,
+    pub title: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub project_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub project_name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<BackendError>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportProjectsResult {
+    pub added: usize,
+    pub updated: usize,
+    pub skipped: usize,
 }
 
 pub fn normalize_node_version(value: &str) -> String {
@@ -220,5 +299,13 @@ pub fn package_manager_command_name(package_manager: ProjectPackageManager) -> &
         ProjectPackageManager::Pnpm => "pnpm",
         ProjectPackageManager::Cnpm => "cnpm",
         ProjectPackageManager::Yarn => "yarn",
+    }
+}
+
+pub fn backend_error(code: BackendErrorCode, message: impl Into<String>) -> BackendError {
+    BackendError {
+        code,
+        message: message.into(),
+        detail: None,
     }
 }
