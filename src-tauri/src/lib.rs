@@ -6,6 +6,8 @@ mod project_directory;
 mod runtime;
 mod store;
 
+pub use contracts::export_typescript_contracts;
+
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Mutex,
@@ -43,6 +45,10 @@ pub fn run() {
             allow_window_close: AtomicBool::new(false),
         })
         .setup(|app| {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.set_theme(Some(tauri::Theme::Dark));
+            }
+
             setup_tray(app)?;
 
             let startup_settings = {
@@ -55,9 +61,9 @@ pub fn run() {
                 settings
             };
 
-            if is_autostart_launch() && startup_settings.launch_minimized_on_login {
+            if startup_settings.launch_minimized_on_login {
                 if let Some(window) = app.get_webview_window("main") {
-                    let _ = window.minimize();
+                    let _ = window.hide();
                 }
             }
 
@@ -79,29 +85,32 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
-            commands::list_projects,
-            commands::save_project,
-            commands::delete_project,
-            commands::list_runtimes,
-            commands::diagnose_project,
-            commands::inspect_project_directory,
-            commands::get_environment,
-            commands::import_projects,
-            commands::export_projects,
-            commands::install_node_version,
-            commands::get_app_startup_settings,
-            commands::save_app_startup_settings,
-            commands::start_project,
-            commands::stop_project,
-            commands::open_project_directory,
-            commands::open_project_terminal,
-            commands::open_external,
-            commands::minimize_app_to_tray,
-            commands::ensure_delete_tool,
-            commands::delete_project_node_modules,
-            commands::reinstall_project_node_modules,
-            commands::confirm_app_close,
-            commands::cancel_app_close
+            commands::projects::list_projects,
+            commands::projects::get_project_panel_snapshot,
+            commands::projects::save_project,
+            commands::projects::delete_project,
+            commands::runtime::list_runtimes,
+            commands::projects::diagnose_project,
+            commands::projects::diagnose_projects,
+            commands::projects::preflight_project_start,
+            commands::projects::inspect_project_directory,
+            commands::environment::get_environment,
+            commands::projects::import_projects,
+            commands::projects::export_projects,
+            commands::environment::install_node_version,
+            commands::environment::get_app_startup_settings,
+            commands::environment::save_app_startup_settings,
+            commands::runtime::start_project,
+            commands::runtime::stop_project,
+            commands::environment::open_project_directory,
+            commands::environment::open_project_terminal,
+            commands::environment::open_external,
+            commands::app::minimize_app_to_tray,
+            commands::runtime::ensure_delete_tool,
+            commands::runtime::delete_project_node_modules,
+            commands::runtime::reinstall_project_node_modules,
+            commands::app::confirm_app_close,
+            commands::app::cancel_app_close
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
@@ -244,9 +253,6 @@ async fn run_project_autostart(app: AppHandle) {
     }
 }
 
-fn is_autostart_launch() -> bool {
-    std::env::args().any(|arg| arg == "--autostart")
-}
 
 pub(crate) fn lock_error<T>(_: std::sync::PoisonError<T>) -> String {
     "应用内部状态异常，请重试。".to_string()

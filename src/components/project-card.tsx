@@ -1,7 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
   CheckCircle2,
+  Check,
+  Copy,
   ExternalLink,
   FolderOpen,
   LoaderCircle,
@@ -13,17 +15,25 @@ import {
   TerminalSquare,
   Trash2,
 } from "lucide-react";
+import {
+  areOperationEventsEqual,
+  areProjectConfigsEqual,
+  areProjectDiagnosesEqual,
+  areProjectRuntimesEqual,
+  getProjectRuntimeErrorMessage,
+  selectProjectCardPanelState,
+} from "@/features/project-panel/helpers";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { Toaster, toast } from "sonner";
 import { getProjectStatusLabel } from "@/lib/ui-copy";
 import { cn } from "@/lib/utils";
 import type {
   OperationEvent,
   ProjectConfig,
   ProjectDiagnosis,
-  ProjectLogEntry,
   ProjectRuntime,
 } from "@/shared/contracts";
 
@@ -33,6 +43,9 @@ type ProjectCardProps = {
   runtimeFailureMessage?: string;
   operationPanel?: OperationEvent;
   diagnosis?: ProjectDiagnosis;
+  isDiagnosisPending: boolean;
+  isStartPending: boolean;
+  isStopPending: boolean;
   isStartLocked: boolean;
   isStopLocked: boolean;
   isEditLocked: boolean;
@@ -53,46 +66,39 @@ type ProjectCardProps = {
   onOpenUrl: (url: string) => void;
 };
 
+function areProjectCardPropsEqual(left: ProjectCardProps, right: ProjectCardProps) {
+  return (
+    areProjectConfigsEqual(left.project, right.project) &&
+    areProjectRuntimesEqual(left.runtime, right.runtime) &&
+    left.runtimeFailureMessage === right.runtimeFailureMessage &&
+    areOperationEventsEqual(left.operationPanel, right.operationPanel) &&
+    areProjectDiagnosesEqual(left.diagnosis, right.diagnosis) &&
+    left.isDiagnosisPending === right.isDiagnosisPending &&
+    left.isStartPending === right.isStartPending &&
+    left.isStopPending === right.isStopPending &&
+    left.isStartLocked === right.isStartLocked &&
+    left.isStopLocked === right.isStopLocked &&
+    left.isEditLocked === right.isEditLocked &&
+    left.isDeleteLocked === right.isDeleteLocked &&
+    left.isDeleteNodeModulesLocked === right.isDeleteNodeModulesLocked &&
+    left.isReinstallNodeModulesLocked === right.isReinstallNodeModulesLocked &&
+    left.isTerminalLocked === right.isTerminalLocked &&
+    left.isDirectoryLocked === right.isDirectoryLocked &&
+    left.isAddressLocked === right.isAddressLocked
+  );
+}
+
 function getStatusClassName(status: ProjectRuntime["status"] | undefined) {
   switch (status) {
     case "running":
-      return "border-emerald-400/20 bg-emerald-400/10 text-emerald-100";
+      return "border-primary/40 bg-primary/10 text-primary";
     case "starting":
-      return "border-sky-400/20 bg-sky-400/10 text-sky-100";
+      return "border-emerald-400/40 bg-emerald-400/10 text-emerald-300";
     case "error":
-      return "border-rose-400/20 bg-rose-400/10 text-rose-100";
+      return "border-destructive/40 bg-destructive/10 text-destructive-foreground";
     default:
-      return "border-white/10 bg-white/5 text-muted-foreground";
+      return "border-border/50 bg-white/5 text-muted-foreground";
   }
-}
-
-function getTerminalPreview(logs: ProjectLogEntry[] | undefined) {
-  if (!logs?.length) {
-    return [];
-  }
-
-  return logs
-    .filter((entry) => entry.level !== "system")
-    .flatMap((entry) =>
-      entry.message
-        .split(/\r?\n/u)
-        .map((line) => line.trim())
-        .filter(Boolean)
-    )
-    .slice(-8);
-}
-
-function getRuntimeErrorMessage(runtime: ProjectRuntime | undefined) {
-  if (!runtime) {
-    return "启动失败，请查看终端输出。";
-  }
-
-  const recentLogMessage = [...(runtime.recentLogs ?? [])]
-    .reverse()
-    .map((entry) => entry.message.trim())
-    .find(Boolean);
-
-  return runtime.lastMessage?.trim() || recentLogMessage || "启动失败，请查看终端输出。";
 }
 
 function getOperationTone(status: OperationEvent["status"]) {
@@ -107,10 +113,10 @@ function getOperationTone(status: OperationEvent["status"]) {
       };
     case "running":
       return {
-        shell: "border-sky-400/20 bg-sky-500/[0.07]",
-        icon: "bg-sky-500/15 text-sky-200",
-        text: "text-sky-100",
-        subtext: "text-sky-100/70",
+        shell: "border-primary/20 bg-primary/[0.07]",
+        icon: "bg-primary/15 text-primary",
+        text: "text-primary",
+        subtext: "text-primary/70",
         badge: "处理中",
       };
     case "success":
@@ -132,16 +138,16 @@ function getOperationTone(status: OperationEvent["status"]) {
   }
 }
 
-function getOperationIcon(event: OperationEvent) {
+function getOperationIcon(event: OperationEvent, className = "size-4") {
   if (event.status === "running") {
-    return <LoaderCircle className="size-4 animate-spin" />;
+    return <LoaderCircle className={cn(className, "animate-spin")} />;
   }
 
   if (event.status === "success") {
-    return <CheckCircle2 className="size-4" />;
+    return <CheckCircle2 className={className} />;
   }
 
-  return <RefreshCw className="size-4" />;
+  return <RefreshCw className={className} />;
 }
 
 function getDiagnosisTone(diagnosis: ProjectDiagnosis) {
@@ -162,16 +168,20 @@ function getDiagnosisTone(diagnosis: ProjectDiagnosis) {
     text: "text-amber-100",
     subtext: "text-amber-100/70",
     title: "启动前还需处理",
-    message: diagnosis.readiness.warnings[0] ?? "当前项目还需要补充环境后才能启动。",
+    message:
+      diagnosis.readiness.warnings[0] ?? "当前项目还需要补全环境后才能启动。",
   };
 }
 
-export function ProjectCard({
+export const ProjectCard = memo(function ProjectCard({
   project,
   runtime,
   runtimeFailureMessage,
   operationPanel,
   diagnosis,
+  isDiagnosisPending,
+  isStartPending,
+  isStopPending,
   isStartLocked,
   isStopLocked,
   isEditLocked,
@@ -192,17 +202,25 @@ export function ProjectCard({
   onStop,
 }: ProjectCardProps) {
   const status = runtime?.status ?? "stopped";
-  const isBusy = status === "running" || status === "starting";
-  const addresses = runtime?.detectedAddresses ?? [];
-  const showAddresses = addresses.length > 0 && isBusy;
-  const terminalPreview = useMemo(() => getTerminalPreview(runtime?.recentLogs), [runtime?.recentLogs]);
-  const showTerminalPreview = !operationPanel && !showAddresses && isBusy;
-  const showRuntimeError = !operationPanel && Boolean(runtimeFailureMessage || status === "error");
-  const showDiagnosis =
-    !operationPanel && !showAddresses && status === "stopped" && Boolean(diagnosis);
+  const isRunning = status === "running";
+  const isStarting = status === "starting";
+  const isStartingPulse = isStartPending || isStarting;
+  const isStopping = isStopPending;
+  const isBusy = isRunning || isStarting;
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuToggleLocked, setMenuToggleLocked] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
+  const panelState = useMemo(
+    () =>
+      selectProjectCardPanelState({
+        runtime,
+        runtimeFailureMessage,
+        operationPanel,
+        diagnosis,
+        isDiagnosisPending,
+      }),
+    [diagnosis, isDiagnosisPending, operationPanel, runtime, runtimeFailureMessage]
+  );
 
   useEffect(() => {
     if (!menuOpen) {
@@ -252,47 +270,76 @@ export function ProjectCard({
     onReinstallNodeModules();
   }
 
-  const operationTone = operationPanel ? getOperationTone(operationPanel.status) : null;
-  const diagnosisTone = diagnosis ? getDiagnosisTone(diagnosis) : null;
+  const operationTone =
+    panelState.kind === "operation" ? getOperationTone(panelState.event.status) : null;
+  const diagnosisTone =
+    panelState.kind === "diagnosis" ? getDiagnosisTone(panelState.diagnosis) : null;
+  const showStopLoading = isStopping;
+  const showStartLoading = isStartPending || isStarting;
+  const isShowingStopState = isRunning || showStopLoading;
+  const actionButtonLabel = showStopLoading
+    ? "停止中..."
+    : showStartLoading
+      ? "启动中..."
+      : isRunning
+        ? "停止"
+        : "启动";
+
+  const isShowMultiMarquee = isRunning && panelState.kind === "addresses";
+  const isShowGreenMarquee = isStartingPulse || (isRunning && !isShowMultiMarquee);
 
   return (
     <Card
       className={cn(
-        "self-start overflow-hidden border-white/10 bg-[#171d2a]/94 py-0 shadow-lg shadow-black/20 backdrop-blur-sm transition-all duration-500",
-        isBusy && "running-marquee !border-primary/30"
+        "group self-start overflow-hidden rounded-xl border-border/80 bg-black/40 py-0 shadow-2xl backdrop-blur-xl transition-all duration-500 glass-border hover-glow",
+        isShowMultiMarquee && "running-marquee-multi !border-transparent",
+        isShowGreenMarquee && "running-marquee-green !border-transparent"
       )}
     >
-      <div className="border-b border-white/8 px-3.5 py-2.5">
+      <div className="border-b border-border/30 px-3.5 py-2.5 bg-white/2">
         <div className="flex items-center justify-between gap-3">
-          <div className="min-w-0 flex items-center gap-1.5">
-            <div className="truncate text-[15px] font-semibold tracking-tight text-foreground">
-              {project.name}
-            </div>
-
+          <div className="min-w-0 flex items-center gap-2">
             <Tooltip>
               <TooltipTrigger asChild>
-                <Button
+                <button
                   type="button"
-                  variant="ghost"
-                  size="icon-xs"
-                  className="size-5 text-muted-foreground hover:text-foreground"
+                  className="truncate text-sm font-bold tracking-wider text-foreground hover:text-primary transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-70"
                   onClick={onOpenDirectory}
                   disabled={isDirectoryLocked}
                 >
-                  <FolderOpen className="size-3.5" />
-                </Button>
+                  {project.name}
+                </button>
               </TooltipTrigger>
               <TooltipContent sideOffset={8}>打开项目目录</TooltipContent>
             </Tooltip>
           </div>
 
           <div className="flex items-center gap-1.5">
-            <Badge
-              variant="outline"
-              className={cn("rounded-full px-2 py-0 text-[10px]", getStatusClassName(status))}
-            >
-              {getProjectStatusLabel(status)}
-            </Badge>
+            {status !== "stopped" && (
+              <Badge
+                variant="outline"
+                className={cn(
+                  "rounded-full px-2 py-0 text-[10px] flex items-center gap-1",
+                  panelState.kind === "addresses" 
+                    ? getStatusClassName("running") 
+                    : (status === "running" || status === "starting") 
+                      ? getStatusClassName("starting") 
+                      : getStatusClassName(status)
+                )}
+              >
+                {panelState.kind === "addresses" && (
+                  <span className="relative flex size-1.5">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75"></span>
+                    <span className="relative inline-flex rounded-full size-1.5 bg-primary"></span>
+                  </span>
+                )}
+                {panelState.kind === "addresses" 
+                  ? "运行中" 
+                  : (status === "starting" || status === "running") 
+                    ? "启动中" 
+                    : getProjectStatusLabel(status)}
+              </Badge>
+            )}
 
             <div ref={menuRef} className="relative">
               <Tooltip>
@@ -300,61 +347,61 @@ export function ProjectCard({
                   <Button
                     type="button"
                     variant="ghost"
-                    size="icon-xs"
-                    className="size-5 text-muted-foreground hover:text-foreground"
+                    size="icon"
+                    className="size-6 text-muted-foreground hover:text-foreground"
                     onClick={handleToggleMenu}
                     disabled={menuToggleLocked}
                   >
-                    <Settings2 className="size-3.5" />
+                    <Settings2 className="size-4" />
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent sideOffset={8}>更多操作</TooltipContent>
               </Tooltip>
 
               {menuOpen ? (
-                <div className="absolute right-0 top-7 z-20 min-w-40 rounded-xl border border-white/10 bg-[#111827]/96 p-1.5 shadow-2xl shadow-black/40 backdrop-blur-xl">
+                <div className="absolute right-0 top-7 z-20 min-w-40 rounded-lg border border-border/80 bg-black/60 p-1.5 shadow-[0_8px_40px_rgba(0,0,0,0.8)] backdrop-blur-xl">
                   <button
                     type="button"
-                    className="flex w-full items-center gap-2 whitespace-nowrap rounded-lg px-3 py-2 text-left text-sm text-foreground transition-colors hover:bg-white/8 disabled:opacity-50"
+                    className="flex w-full items-center gap-2.5 whitespace-nowrap rounded-lg px-3 py-2 text-left text-sm text-foreground transition-colors hover:bg-white/8 disabled:opacity-50"
                     onClick={handleEdit}
                     disabled={isBusy || isEditLocked}
                   >
-                    <Pencil className="size-3.5" />
+                    <Pencil className="size-4" />
                     编辑
                   </button>
                   <button
                     type="button"
-                    className="flex w-full items-center gap-2 whitespace-nowrap rounded-lg px-3 py-2 text-left text-sm text-foreground transition-colors hover:bg-white/8 disabled:opacity-50"
+                    className="flex w-full items-center gap-2.5 whitespace-nowrap rounded-lg px-3 py-2 text-left text-sm text-foreground transition-colors hover:bg-white/8 disabled:opacity-50"
                     onClick={handleDeleteDependencies}
                     disabled={isBusy || isDeleteNodeModulesLocked}
                   >
                     {isDeleteNodeModulesLocked ? (
-                      <LoaderCircle className="size-3.5 animate-spin" />
+                      <LoaderCircle className="size-4 animate-spin" />
                     ) : (
-                      <Trash2 className="size-3.5" />
+                      <Trash2 className="size-4" />
                     )}
                     删除依赖
                   </button>
                   <button
                     type="button"
-                    className="flex w-full items-center gap-2 whitespace-nowrap rounded-lg px-3 py-2 text-left text-sm text-foreground transition-colors hover:bg-white/8 disabled:opacity-50"
+                    className="flex w-full items-center gap-2.5 whitespace-nowrap rounded-lg px-3 py-2 text-left text-sm text-foreground transition-colors hover:bg-white/8 disabled:opacity-50"
                     onClick={handleReinstallDependencies}
                     disabled={isBusy || isReinstallNodeModulesLocked}
                   >
                     {isReinstallNodeModulesLocked ? (
-                      <LoaderCircle className="size-3.5 animate-spin" />
+                      <LoaderCircle className="size-4 animate-spin" />
                     ) : (
-                      <RefreshCw className="size-3.5" />
+                      <RefreshCw className="size-4" />
                     )}
                     重装依赖
                   </button>
                   <button
                     type="button"
-                    className="flex w-full items-center gap-2 whitespace-nowrap rounded-lg px-3 py-2 text-left text-sm text-rose-100 transition-colors hover:bg-rose-500/10 disabled:opacity-50"
+                    className="flex w-full items-center gap-2.5 whitespace-nowrap rounded-lg px-3 py-2 text-left text-sm text-rose-100 transition-colors hover:bg-rose-500/10 disabled:opacity-50"
                     onClick={handleDelete}
                     disabled={isBusy || isDeleteLocked}
                   >
-                    <Trash2 className="size-3.5" />
+                    <Trash2 className="size-4" />
                     移除项目
                   </button>
                 </div>
@@ -364,12 +411,12 @@ export function ProjectCard({
         </div>
       </div>
 
-      <div className="px-3.5 py-3">
-        <div className="flex h-[9.5rem] items-center rounded-xl border border-white/8 bg-[#101621] px-3 py-3">
-          {operationPanel && operationTone ? (
+      <div className="px-3.5 py-1">
+        <div className="flex h-[9.8rem] items-center overflow-hidden rounded-lg bg-black/80 shadow-[inset_0_2px_10px_rgba(0,0,0,0.5)] border border-white/5 transition-colors">
+          {panelState.kind === "operation" && operationTone ? (
             <div
               className={cn(
-                "flex h-full w-full flex-col justify-center rounded-xl border px-4 py-3 transition-colors",
+                "flex h-full w-full flex-col justify-center flex-1 pointer-events-none px-4 py-3 transition-colors",
                 operationTone.shell
               )}
             >
@@ -377,14 +424,14 @@ export function ProjectCard({
                 <div className="flex items-center gap-2">
                   <div
                     className={cn(
-                      "flex size-8 items-center justify-center rounded-full border border-white/10",
+                      "flex size-9 items-center justify-center rounded-full border border-border/50",
                       operationTone.icon
                     )}
                   >
-                    {getOperationIcon(operationPanel)}
+                    {getOperationIcon(panelState.event, "size-4.5")}
                   </div>
                   <div className="text-sm font-semibold text-foreground">
-                    {operationPanel.title}
+                    {panelState.event.title}
                   </div>
                 </div>
                 <div className={cn("text-[11px] font-medium", operationTone.subtext)}>
@@ -393,37 +440,37 @@ export function ProjectCard({
               </div>
 
               <div className={cn("line-clamp-2 text-sm leading-6", operationTone.text)}>
-                {operationPanel.message ?? "正在处理中，请稍后..."}
+                {panelState.event.message ?? "正在处理中，请稍后..."}
               </div>
             </div>
-          ) : showRuntimeError ? (
-            <div className="flex h-full w-full flex-col justify-center rounded-xl border border-rose-400/20 bg-rose-500/[0.07] px-4 py-3">
-              <div className="mb-3 flex items-center gap-2">
-                <div className="flex size-8 items-center justify-center rounded-full border border-white/10 bg-rose-500/15 text-rose-200">
-                  <AlertTriangle className="size-4" />
+          ) : panelState.kind === "failure" ? (
+            <div className="flex h-full w-full flex-col justify-center flex-1 pointer-events-none border-rose-400/20 bg-rose-500/[0.07] px-4 py-3">
+              <div className="mb-3 flex items-center gap-2.5">
+                <div className="flex size-9 items-center justify-center rounded-full border border-border/50 bg-rose-500/15 text-rose-200">
+                  <AlertTriangle className="size-4.5" />
                 </div>
                 <div className="text-sm font-semibold text-foreground">启动失败</div>
               </div>
 
               <div className="line-clamp-3 text-sm leading-6 text-rose-100">
-                {runtimeFailureMessage ?? getRuntimeErrorMessage(runtime)}
+                {panelState.message ?? getProjectRuntimeErrorMessage(runtime)}
               </div>
             </div>
-          ) : showDiagnosis && diagnosis && diagnosisTone ? (
+          ) : panelState.kind === "diagnosis" && diagnosisTone ? (
             <div
               className={cn(
-                "flex h-full w-full flex-col justify-center rounded-xl border px-4 py-3 transition-colors",
+                "flex h-full w-full flex-col justify-center flex-1 pointer-events-none px-4 py-3 transition-colors",
                 diagnosisTone.shell
               )}
             >
               <div className="mb-3 flex items-center gap-2">
                 <div
                   className={cn(
-                    "flex size-8 items-center justify-center rounded-full border border-white/10",
+                    "flex size-9 items-center justify-center rounded-full border border-border/50",
                     diagnosisTone.icon
                   )}
                 >
-                  <CheckCircle2 className="size-4" />
+                  <CheckCircle2 className="size-4.5" />
                 </div>
                 <div className="text-sm font-semibold text-foreground">{diagnosisTone.title}</div>
               </div>
@@ -432,36 +479,71 @@ export function ProjectCard({
                 {diagnosisTone.message}
               </div>
 
-              {!diagnosis.readiness.canStart && diagnosis.readiness.warnings.length > 1 ? (
+              {!panelState.diagnosis.readiness.canStart &&
+              panelState.diagnosis.readiness.warnings.length > 1 ? (
                 <div className={cn("mt-2 text-xs", diagnosisTone.subtext)}>
-                  另外还有 {diagnosis.readiness.warnings.length - 1} 项需要处理。
+                  另外还有 {panelState.diagnosis.readiness.warnings.length - 1} 项需要处理。
                 </div>
               ) : null}
             </div>
-          ) : showAddresses ? (
+          ) : panelState.kind === "diagnosing" ? (
+            <div className="flex h-full w-full flex-col justify-center flex-1 pointer-events-none border-primary/20 bg-primary/[0.06] px-4 py-3 transition-colors">
+              <div className="mb-3 flex items-center gap-2.5">
+                <div className="flex size-9 items-center justify-center rounded-full border border-border/50 bg-primary/15 text-primary">
+                  <LoaderCircle className="size-4.5 animate-spin" />
+                </div>
+                <div className="text-sm font-semibold text-foreground">
+                  正在检测启动环境...
+                </div>
+              </div>
+
+              <div className="line-clamp-2 text-sm leading-6 text-primary">
+                正在检查当前项目的 Node、包管理器和启动命令，请稍候...
+              </div>
+            </div>
+          ) : panelState.kind === "addresses" ? (
             <div className="flex h-full w-full items-center justify-center">
               <div className="w-full max-w-[22rem] space-y-2">
-                {addresses.map((address) => (
-                  <button
+                {panelState.addresses.map((address) => (
+                  <div 
                     key={address.url}
-                    type="button"
-                    className="flex h-8 w-full items-center justify-between gap-2.5 rounded-xl border border-white/8 bg-white/5 px-3 text-left transition-colors hover:border-primary/40 hover:bg-primary/8 disabled:opacity-60"
-                    onClick={() => onOpenUrl(address.url)}
-                    disabled={isAddressLocked}
+                    className="flex w-full items-center gap-1.5"
                   >
-                    <span className="truncate font-mono text-xs text-foreground">
-                      {address.url}
-                    </span>
-                    <ExternalLink className="size-3.5 shrink-0 text-primary" />
-                  </button>
+                    <button
+                      type="button"
+                      className="flex h-9 w-full flex-1 items-center justify-between gap-2.5 rounded-xl border border-border/30 bg-white/5 px-3 text-left transition-colors hover:border-primary/40 hover:bg-primary/8 disabled:opacity-60"
+                      onClick={() => onOpenUrl(address.url)}
+                      disabled={isAddressLocked}
+                    >
+                      <span className="truncate font-mono text-xs text-foreground">
+                        {address.url}
+                      </span>
+                      <ExternalLink className="size-4 shrink-0 text-primary" />
+                    </button>
+                    
+                    <button
+                      type="button"
+                      className="flex size-9 items-center justify-center rounded-xl border border-border/30 bg-white/5 text-muted-foreground transition-all hover:border-primary/40 hover:bg-primary/8 hover:text-primary active:scale-90"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        navigator.clipboard.writeText(address.url);
+                        toast.success("链接已复制", {
+                          duration: 1500,
+                          position: "bottom-center"
+                        });
+                      }}
+                    >
+                      <Copy className="size-4" />
+                    </button>
+                  </div>
                 ))}
               </div>
             </div>
-          ) : showTerminalPreview ? (
-            <div className="h-full w-full overflow-auto rounded-xl border border-white/8 bg-black/20 px-3 py-2">
-              {terminalPreview.length > 0 ? (
+          ) : panelState.kind === "terminal" ? (
+            <div className="h-full w-full overflow-auto rounded-lg border border-border/50 bg-black/50 px-3 py-2 backdrop-blur-sm">
+              {panelState.lines.length > 0 ? (
                 <pre className="whitespace-pre-wrap break-words font-mono text-[10px] leading-[1.45] text-muted-foreground">
-                  {terminalPreview.join("\n")}
+                  {panelState.lines.join("\n")}
                 </pre>
               ) : (
                 <div className="font-mono text-[10px] leading-[1.45] text-muted-foreground">
@@ -470,38 +552,47 @@ export function ProjectCard({
               )}
             </div>
           ) : (
-            <div className="flex h-full w-full items-center justify-center rounded-xl border border-dashed border-white/10 bg-black/10 px-3 text-[13px] text-muted-foreground">
+            <div className="flex h-full w-full items-center justify-center rounded-xl border border-dashed border-border/50 bg-black/10 px-3 text-[13px] text-muted-foreground">
               项目未启动
             </div>
           )}
         </div>
       </div>
 
-      <div className="flex items-center justify-between gap-3 border-t border-white/8 px-3.5 py-2.5">
+      <div className="flex items-center justify-between gap-3 border-t border-border/30 px-3.5 py-2.5">
         <Button
           type="button"
-          size="sm"
+          size="default"
           variant="outline"
-          className="h-7 px-3 text-[11px]"
+          className="h-9 px-4 text-xs"
           onClick={onOpenTerminalOutput}
           disabled={isTerminalLocked}
         >
-          <TerminalSquare className="size-3.5" />
+          <TerminalSquare className="size-4" />
           终端
         </Button>
 
         <Button
           type="button"
-          size="sm"
-          variant={isBusy ? "destructive" : "default"}
-          className="h-7 px-3 text-[11px]"
-          onClick={isBusy ? onStop : onStart}
-          disabled={isBusy ? isStopLocked : isStartLocked}
+          size="default"
+          variant={isShowingStopState ? "destructive" : "default"}
+          className={cn(
+            "h-9 gap-1.5 px-4 transition-all active:scale-95",
+            isShowingStopState && "shadow-[0_0_15px_rgba(251,86,91,0.15)]"
+          )}
+          onClick={isShowingStopState ? onStop : onStart}
+          disabled={showStopLoading || (isShowingStopState ? isStopLocked : isStartLocked)}
         >
-          {isBusy ? <Square className="size-3.5" /> : <Play className="size-3.5" />}
-          {isBusy ? "停止" : "启动"}
+          {showStopLoading || showStartLoading ? (
+            <LoaderCircle className="size-4 animate-spin" />
+          ) : isShowingStopState ? (
+            <Square className="size-4" />
+          ) : (
+            <Play className="size-4" />
+          )}
+          <span className="text-xs">{actionButtonLabel}</span>
         </Button>
       </div>
     </Card>
   );
-}
+}, areProjectCardPropsEqual);

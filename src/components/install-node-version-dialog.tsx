@@ -1,4 +1,4 @@
-﻿import { AlertTriangle } from "lucide-react";
+import { AlertTriangle } from "lucide-react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -30,7 +30,10 @@ export function InstallNodeVersionDialog({
 }: InstallNodeVersionDialogProps) {
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
-      <AlertDialogContent className="border-white/10 bg-[#0d1426]/96 backdrop-blur-xl">
+      <AlertDialogContent 
+        className="border-border/50 bg-black/60 backdrop-blur-xl"
+        onOpenAutoFocus={(event) => event.preventDefault()}
+      >
         <AlertDialogHeader>
           <AlertDialogMedia className="border border-amber-500/20 bg-amber-500/10 text-amber-100">
             <AlertTriangle className="size-7" />

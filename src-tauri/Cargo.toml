@@ -4,6 +4,7 @@ version = "2.0.0"
 description = "前端项目启动面板"
 authors = ["Codex <codex@openai.com>"]
 edition = "2021"
+default-run = "switch-project-panel"
 
 [lib]
 name = "switch_project_panel_lib"
@@ -24,4 +25,5 @@ tauri-plugin-autostart = "2.5.1"
 tauri-plugin-dialog = "2.7.0"
 tauri-plugin-opener = "2.5.3"
 tokio = { version = "1.48.0", features = ["io-util", "macros", "process", "rt-multi-thread", "sync", "time"] }
+ts-rs = "12.0.1"
 url = "2.5.7"

@@ -1,4 +1,4 @@
-﻿import type { Dispatch, SetStateAction } from "react";
+import type { Dispatch, SetStateAction } from "react";
 import { LaptopMinimalCheck, Rocket } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -39,7 +39,7 @@ function SettingsRow({
   onCheckedChange,
 }: SettingsRowProps) {
   return (
-    <div className="rounded-2xl border border-white/8 bg-black/10 p-4">
+    <div className="rounded-lg border border-border/30 bg-black/10 p-4">
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 text-sm font-medium text-foreground">
@@ -65,10 +65,11 @@ export function StartupSettingsDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        className="max-w-xl border-white/10 bg-[#0d1426]/95 p-6 backdrop-blur-xl"
+        className="max-w-xl border-border/50 bg-black/60 p-6 backdrop-blur-xl"
         onInteractOutside={(event) => {
           event.preventDefault();
         }}
+        onOpenAutoFocus={(event) => event.preventDefault()}
       >
         <DialogHeader className="space-y-2">
           <DialogTitle className="text-2xl font-semibold tracking-tight">启动设置</DialogTitle>
@@ -92,10 +93,9 @@ export function StartupSettingsDialog({
           />
           <SettingsRow
             icon={LaptopMinimalCheck}
-            title="最小化到托盘"
-            description="开机自动启动时，窗口不直接显示，而是最小化到托盘。"
+            title="启动后最小化到托盘"
+            description="软件启动时，窗口不直接显示，而是最小化到系统托盘。"
             checked={settings.launchMinimizedOnLogin}
-            disabled={!settings.openAtLogin}
             onCheckedChange={(checked) =>
               onSettingsChange((current) => ({
                 ...current,

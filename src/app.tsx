@@ -1,5 +1,54 @@
+import { useEffect, useState } from "react";
+import { AnimatePresence, motion } from "framer-motion";
+import { GradientDots } from "@/components/gradient-dots";
 import { ProjectPanelScreen } from "@/features/project-panel/project-panel-screen";
+import { loadingStore } from "@/lib/loading-store";
 
 export function App() {
-  return <ProjectPanelScreen />;
+  const [showLoader, setShowLoader] = useState(true);
+
+  useEffect(() => {
+    // 订阅全局加载状态
+    const unsubscribe = loadingStore.subscribe((isLoading) => {
+      if (!isLoading) {
+        // 当业务逻辑加载完成（包括同步配置和运行状态）后，延迟 1 秒关闭背景
+        setTimeout(() => {
+          setShowLoader(false);
+        }, 1000);
+      }
+    });
+
+    // 如果组件挂载时已经加载完成（虽然概率极低）
+    if (!loadingStore.getIsLoading()) {
+      setTimeout(() => {
+        setShowLoader(false);
+      }, 1000);
+    }
+
+    return () => unsubscribe();
+  }, []);
+
+  return (
+    <>
+      <AnimatePresence>
+        {showLoader && (
+          <motion.div
+            key="loader"
+            initial={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.8, ease: "easeInOut" }}
+            className="fixed inset-0 z-[9999] flex items-center justify-center bg-background"
+          >
+            <GradientDots 
+              dotSize={6} 
+              spacing={14} 
+              className="opacity-40"
+              backgroundColor="var(--background)"
+            />
+          </motion.div>
+        )}
+      </AnimatePresence>
+      <ProjectPanelScreen />
+    </>
+  );
 }

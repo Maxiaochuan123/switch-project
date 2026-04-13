@@ -4,8 +4,8 @@
   "version": "2.0.0",
   "identifier": "com.codex.switch-project-panel",
   "build": {
-    "beforeDevCommand": "npm run web:dev",
-    "beforeBuildCommand": "npm run web:build",
+    "beforeDevCommand": "node scripts/check-node-version.mjs && cargo run --quiet --manifest-path src-tauri/Cargo.toml --bin export-contracts && vite --port 1420",
+    "beforeBuildCommand": "node scripts/check-node-version.mjs && cargo run --quiet --manifest-path src-tauri/Cargo.toml --bin export-contracts && vite build",
     "devUrl": "http://localhost:1420",
     "frontendDist": "../dist"
   },

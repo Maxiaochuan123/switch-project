@@ -24,7 +24,7 @@ function DiagnosisItem({
   ok: boolean;
 }) {
   return (
-    <div className="flex items-center justify-between rounded-xl border border-white/8 bg-black/10 px-3 py-2 text-sm">
+    <div className="flex items-center justify-between rounded-xl border border-border/30 bg-black/10 px-3 py-2 text-sm">
       <span className="text-muted-foreground">{label}</span>
       <span className={ok ? "text-emerald-300" : "text-amber-300"}>{ok ? "正常" : "待处理"}</span>
     </div>
@@ -40,7 +40,10 @@ export function ProjectDiagnosisDialog({
 }: ProjectDiagnosisDialogProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg border-white/10 bg-[#0d1426]/95 backdrop-blur-xl">
+      <DialogContent 
+        className="max-w-lg border-border/50 bg-black/60 backdrop-blur-xl"
+        onOpenAutoFocus={(event) => event.preventDefault()}
+      >
         <DialogHeader className="space-y-2">
           <DialogTitle className="flex items-center gap-2 text-2xl font-semibold tracking-tight">
             <Activity className="size-5 text-primary" />
@@ -68,7 +71,7 @@ export function ProjectDiagnosisDialog({
               <DiagnosisItem label="可直接启动" ok={diagnosis.readiness.canStart} />
             </div>
 
-            <div className="rounded-2xl border border-white/8 bg-black/10 p-4 text-sm text-muted-foreground">
+            <div className="rounded-lg border border-border/30 bg-black/10 p-4 text-sm text-muted-foreground">
               <div className="space-y-2">
                 <div className="flex items-center justify-between gap-4">
                   <span>项目路径</span>
@@ -104,7 +107,7 @@ export function ProjectDiagnosisDialog({
             </div>
 
             {diagnosis.readiness.warnings.length > 0 ? (
-              <div className="rounded-2xl border border-amber-400/20 bg-amber-400/10 p-4 text-sm text-amber-50">
+              <div className="rounded-lg border border-amber-400/20 bg-amber-400/10 p-4 text-sm text-amber-50">
                 <div className="mb-2 font-medium">需要处理的问题</div>
                 <div className="space-y-1">
                   {diagnosis.readiness.warnings.map((warning) => (
@@ -113,7 +116,7 @@ export function ProjectDiagnosisDialog({
                 </div>
               </div>
             ) : (
-              <div className="rounded-2xl border border-emerald-400/20 bg-emerald-400/10 p-4 text-sm text-emerald-50">
+              <div className="rounded-lg border border-emerald-400/20 bg-emerald-400/10 p-4 text-sm text-emerald-50">
                 当前项目环境已经准备就绪，可以直接启动。
               </div>
             )}

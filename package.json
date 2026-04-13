@@ -7,20 +7,18 @@
   "type": "module",
   "scripts": {
     "dev": "tauri dev",
-    "preweb:dev": "node scripts/check-node-version.mjs",
+    "contracts:generate": "cargo run --quiet --manifest-path src-tauri/Cargo.toml --bin export-contracts",
+    "preweb:dev": "node scripts/check-node-version.mjs && cargo run --quiet --manifest-path src-tauri/Cargo.toml --bin export-contracts",
     "web:dev": "vite --port 1420",
-    "preweb:build": "node scripts/check-node-version.mjs",
+    "preweb:build": "node scripts/check-node-version.mjs && cargo run --quiet --manifest-path src-tauri/Cargo.toml --bin export-contracts",
     "web:build": "vite build",
     "build": "tauri build",
+    "prelint": "cargo run --quiet --manifest-path src-tauri/Cargo.toml --bin export-contracts",
     "lint": "eslint --ext .ts,.tsx .",
     "icon:generate": "node scripts/generate-icon.mjs",
     "tauri": "tauri"
   },
-  "keywords": [
-    "tauri",
-    "frontend",
-    "node-version-manager"
-  ],
+  "keywords": ["tauri", "frontend", "node-version-manager"],
   "author": {
     "name": "Codex",
     "email": "codex@openai.com"

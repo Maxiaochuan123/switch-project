@@ -19,7 +19,7 @@ pub(super) fn resolve_project_node_directory(node_version: &str) -> PathBuf {
     nvm_home.join(format!("v{}", normalize_node_version(node_version)))
 }
 
-pub(super) fn build_project_runtime_path(node_version: &str) -> String {
+pub(crate) fn build_project_runtime_path(node_version: &str) -> String {
     let current_path = std::env::var("PATH").unwrap_or_default();
     let node_directory = resolve_project_node_directory(node_version)
         .to_string_lossy()
@@ -70,7 +70,7 @@ pub(super) fn build_project_runtime_path(node_version: &str) -> String {
     paths.join(";")
 }
 
-pub(super) fn ensure_start_command_available(
+pub(crate) fn ensure_start_command_available(
     start_command: &str,
     runtime_path: &str,
 ) -> Result<(), String> {
@@ -143,7 +143,7 @@ pub(super) fn ensure_start_command_available(
     ))
 }
 
-pub(super) fn ensure_package_manager_available(
+pub(crate) fn ensure_package_manager_available(
     package_manager: ProjectPackageManager,
     runtime_path: &str,
 ) -> Result<(), String> {

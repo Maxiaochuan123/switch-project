@@ -9,6 +9,8 @@ import {
   type ProjectConfig,
   type ProjectDiagnosis,
   type ProjectDirectoryInspection,
+  type ProjectPanelSnapshot,
+  type ProjectStartPreflight,
   type ProjectRuntime,
 } from "@/shared/contracts";
 import { invokeCommand } from "./invoke";
@@ -18,11 +20,17 @@ export const desktopCommands: Omit<
   "subscribeRuntime" | "subscribeAppCloseRequest" | "subscribeOperation"
 > = {
   listProjects: () => invokeCommand<ProjectConfig[]>("list_projects"),
+  getProjectPanelSnapshot: () =>
+    invokeCommand<ProjectPanelSnapshot>("get_project_panel_snapshot"),
   saveProject: (project) => invokeCommand("save_project", { project }),
   deleteProject: (projectId) => invokeCommand("delete_project", { projectId }),
   listRuntimes: () => invokeCommand<ProjectRuntime[]>("list_runtimes"),
   diagnoseProject: (projectId) =>
     invokeCommand<ProjectDiagnosis>("diagnose_project", { projectId }),
+  diagnoseProjects: (projectIds) =>
+    invokeCommand<ProjectDiagnosis[]>("diagnose_projects", { projectIds }),
+  preflightProjectStart: (projectId) =>
+    invokeCommand<ProjectStartPreflight>("preflight_project_start", { projectId }),
   inspectProjectDirectory: (projectPath) =>
     invokeCommand<ProjectDirectoryInspection>("inspect_project_directory", { projectPath }),
   getAppStartupSettings: async () => {
@@ -39,10 +47,15 @@ export const desktopCommands: Omit<
   saveAppStartupSettings: async (settings) => {
     const normalizedSettings = normalizeAppStartupSettings(settings);
 
-    if (normalizedSettings.openAtLogin) {
-      await enable();
-    } else {
-      await disable();
+    // Try to update autostart status, but don't block the rest of the settings if it fails
+    try {
+      if (normalizedSettings.openAtLogin) {
+        await enable();
+      } else {
+        await disable();
+      }
+    } catch (error) {
+      console.error("Failed to update autostart status:", error);
     }
 
     await invokeCommand("save_app_startup_settings", { settings: normalizedSettings });

@@ -1,6 +1,9 @@
-use serde::{Deserialize, Serialize};
+use std::{fs, path::PathBuf};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+use serde::{Deserialize, Serialize};
+use ts_rs::{Config as TsConfig, TS};
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "kebab-case")]
 pub enum BackendErrorCode {
     Unknown,
@@ -8,9 +11,12 @@ pub enum BackendErrorCode {
     ProjectNotFound,
     ProjectRunning,
     ProjectPathMissing,
+    NodeVersionMismatch,
     NodeVersionMissing,
+    MissingDependencies,
     PackageManagerMissing,
     StartCommandMissing,
+    StartupCommandFailed,
     NvmMissing,
     StoreReadFailed,
     StoreWriteFailed,
@@ -18,8 +24,9 @@ pub enum BackendErrorCode {
     ExportFailed,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(optional_fields)]
 pub struct BackendError {
     pub code: BackendErrorCode,
     pub message: String,
@@ -27,7 +34,7 @@ pub struct BackendError {
     pub detail: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct ProjectConfig {
     pub id: String,
@@ -43,7 +50,7 @@ pub struct ProjectConfig {
     pub auto_open_local_url_on_start: bool,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "lowercase")]
 pub enum ProjectStatus {
     Stopped,
@@ -52,7 +59,7 @@ pub enum ProjectStatus {
     Error,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "lowercase")]
 pub enum ProjectAddressKind {
     Local,
@@ -60,7 +67,7 @@ pub enum ProjectAddressKind {
     Other,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "lowercase")]
 pub enum ProjectLogLevel {
     Stdout,
@@ -68,7 +75,7 @@ pub enum ProjectLogLevel {
     System,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct ProjectAddress {
     pub url: String,
@@ -77,7 +84,7 @@ pub struct ProjectAddress {
     pub discovered_at: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct ProjectLogEntry {
     pub id: String,
@@ -86,8 +93,9 @@ pub struct ProjectLogEntry {
     pub message: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(optional_fields)]
 pub struct ProjectRuntime {
     pub project_id: String,
     pub status: ProjectStatus,
@@ -100,18 +108,24 @@ pub struct ProjectRuntime {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_message: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub failure_message: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub failure_code: Option<BackendErrorCode>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub suggested_node_version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub detected_url: Option<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(default)]
     pub detected_addresses: Vec<ProjectAddress>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub startup_duration_ms: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_success_at: Option<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(default)]
     pub recent_logs: Vec<ProjectLogEntry>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct DesktopEnvironment {
     pub installed_node_versions: Vec<String>,
@@ -121,7 +135,7 @@ pub struct DesktopEnvironment {
     pub nvm_home: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, TS)]
 #[serde(rename_all = "kebab-case")]
 pub enum ProjectNodeVersionSource {
     Nvmrc,
@@ -130,7 +144,7 @@ pub enum ProjectNodeVersionSource {
     PackageEngines,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "lowercase")]
 pub enum ProjectPackageManager {
     Npm,
@@ -139,7 +153,7 @@ pub enum ProjectPackageManager {
     Yarn,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct ProjectCommandSuggestion {
     pub script_name: String,
@@ -147,7 +161,7 @@ pub struct ProjectCommandSuggestion {
     pub recommended: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct ProjectDirectoryInspection {
     pub exists: bool,
@@ -165,7 +179,7 @@ pub struct ProjectDirectoryInspection {
     pub readiness: ProjectReadiness,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct ProjectReadiness {
     pub node_installed: bool,
@@ -176,7 +190,7 @@ pub struct ProjectReadiness {
     pub warnings: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct ProjectDiagnosis {
     pub project_id: String,
@@ -190,7 +204,34 @@ pub struct ProjectDiagnosis {
     pub start_command: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectPanelSnapshot {
+    pub projects: Vec<ProjectConfig>,
+    pub runtimes: Vec<ProjectRuntime>,
+    pub environment: DesktopEnvironment,
+    pub startup_settings: AppStartupSettings,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(optional_fields)]
+pub struct ProjectStartPreflight {
+    pub can_start: bool,
+    pub missing_dependencies: bool,
+    pub selected_node_version: String,
+    pub has_declared_node_requirement: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub suggested_node_version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub install_node_version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason_code: Option<BackendErrorCode>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason_message: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct AppStartupSettings {
     #[serde(default)]
@@ -208,21 +249,21 @@ impl Default for AppStartupSettings {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct AppCloseRequest {
     pub active_project_count: usize,
     pub active_project_names: Vec<String>,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "lowercase")]
 pub enum DependencyOperation {
     Delete,
     Reinstall,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "kebab-case")]
 pub enum OperationType {
     DependencyDelete,
@@ -232,7 +273,7 @@ pub enum OperationType {
     ProjectDiagnose,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "lowercase")]
 pub enum OperationStatus {
     Queued,
@@ -241,8 +282,9 @@ pub enum OperationStatus {
     Error,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(optional_fields)]
 pub struct OperationEvent {
     pub operation_id: String,
     #[serde(rename = "type")]
@@ -259,7 +301,7 @@ pub struct OperationEvent {
     pub error: Option<BackendError>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct ImportProjectsResult {
     pub added: usize,
@@ -307,5 +349,81 @@ pub fn backend_error(code: BackendErrorCode, message: impl Into<String>) -> Back
         code,
         message: message.into(),
         detail: None,
+    }
+}
+
+pub fn export_typescript_contracts() -> Result<PathBuf, String> {
+    let output_path = generated_typescript_contracts_path();
+    let contents = build_typescript_contracts();
+
+    fs::write(&output_path, contents)
+        .map_err(|error| format!("failed to write TypeScript contracts: {error}"))?;
+
+    Ok(output_path)
+}
+
+fn build_typescript_contracts() -> String {
+    let config = TsConfig::new().with_large_int("number");
+    let mut sections = Vec::new();
+
+    push_typescript_declaration::<BackendErrorCode>(&mut sections, &config);
+    push_typescript_declaration::<BackendError>(&mut sections, &config);
+    push_typescript_declaration::<ProjectStatus>(&mut sections, &config);
+    push_typescript_declaration::<ProjectPackageManager>(&mut sections, &config);
+    push_typescript_declaration::<ProjectConfig>(&mut sections, &config);
+    push_typescript_declaration::<ProjectAddressKind>(&mut sections, &config);
+    push_typescript_declaration::<ProjectAddress>(&mut sections, &config);
+    push_typescript_declaration::<ProjectLogLevel>(&mut sections, &config);
+    push_typescript_declaration::<ProjectLogEntry>(&mut sections, &config);
+    push_typescript_declaration::<ProjectRuntime>(&mut sections, &config);
+    push_typescript_declaration::<DesktopEnvironment>(&mut sections, &config);
+    push_typescript_declaration::<ProjectNodeVersionSource>(&mut sections, &config);
+    push_typescript_declaration::<ProjectCommandSuggestion>(&mut sections, &config);
+    push_typescript_declaration::<ProjectReadiness>(&mut sections, &config);
+    push_typescript_declaration::<ProjectDirectoryInspection>(&mut sections, &config);
+    push_typescript_declaration::<ProjectDiagnosis>(&mut sections, &config);
+    push_typescript_declaration::<AppStartupSettings>(&mut sections, &config);
+    push_typescript_declaration::<ProjectPanelSnapshot>(&mut sections, &config);
+    push_typescript_declaration::<ProjectStartPreflight>(&mut sections, &config);
+    push_typescript_declaration::<AppCloseRequest>(&mut sections, &config);
+    push_typescript_declaration::<DependencyOperation>(&mut sections, &config);
+    push_typescript_declaration::<OperationType>(&mut sections, &config);
+    push_typescript_declaration::<OperationStatus>(&mut sections, &config);
+    push_typescript_declaration::<OperationEvent>(&mut sections, &config);
+    push_typescript_declaration::<ImportProjectsResult>(&mut sections, &config);
+
+    format!(
+        "// This file is generated from Rust contracts. Do not edit by hand.\n// Run `npm run contracts:generate` to refresh it.\n\n{}\n",
+        sections.join("\n\n")
+    )
+}
+
+fn push_typescript_declaration<T: TS>(sections: &mut Vec<String>, config: &TsConfig) {
+    sections.push(format!("export {}", T::decl(config)));
+}
+
+fn generated_typescript_contracts_path() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../src/shared/contracts.generated.ts")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{build_typescript_contracts, generated_typescript_contracts_path};
+
+    #[test]
+    fn generated_typescript_contracts_are_in_sync() {
+        let expected = build_typescript_contracts();
+        let actual = std::fs::read_to_string(generated_typescript_contracts_path())
+            .expect("generated TypeScript contracts should exist");
+
+        assert_eq!(
+            normalize_line_endings(&actual),
+            normalize_line_endings(&expected),
+            "generated TypeScript contracts are out of date; run `npm run contracts:generate`"
+        );
+    }
+
+    fn normalize_line_endings(value: &str) -> String {
+        value.replace("\r\n", "\n")
     }
 }

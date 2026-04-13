@@ -1,4 +1,4 @@
-﻿import { AlertTriangle } from "lucide-react";
+import { AlertTriangle } from "lucide-react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -27,7 +27,10 @@ export function DeleteProjectDialog({
 }: DeleteProjectDialogProps) {
   return (
     <AlertDialog open={Boolean(project)} onOpenChange={onOpenChange}>
-      <AlertDialogContent className="border-white/10 bg-[#0d1426]/96 backdrop-blur-xl">
+      <AlertDialogContent 
+        className="border-border/50 bg-black/60 backdrop-blur-xl"
+        onOpenAutoFocus={(event) => event.preventDefault()}
+      >
         <AlertDialogHeader>
           <AlertDialogMedia className="border border-rose-500/20 bg-rose-500/10 text-rose-100">
             <AlertTriangle className="size-7" />
@@ -41,7 +44,7 @@ export function DeleteProjectDialog({
         </AlertDialogHeader>
 
         {project ? (
-          <div className="rounded-2xl border border-white/8 bg-black/10 p-4 text-sm text-muted-foreground">
+          <div className="rounded-lg border border-border/30 bg-black/10 p-4 text-sm text-muted-foreground">
             <p className="font-medium text-foreground">{project.path}</p>
             <p className="mt-2 font-mono text-xs">Node v{project.nodeVersion}</p>
           </div>

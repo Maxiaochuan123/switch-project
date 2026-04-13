@@ -1,4 +1,4 @@
-﻿import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { TerminalSquare } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import type { ProjectConfig, ProjectRuntime } from "@/shared/contracts";
@@ -61,11 +61,12 @@ export function ProjectLogsDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        className="flex max-h-[88vh] overflow-hidden rounded-[24px] border-white/10 bg-[#0d1426]/96 p-0 backdrop-blur-xl sm:max-w-4xl"
+        className="flex max-h-[88vh] overflow-hidden rounded-xl border-border/50 bg-black/60 p-0 backdrop-blur-xl sm:max-w-4xl"
         onInteractOutside={(event) => event.preventDefault()}
+        onOpenAutoFocus={(event) => event.preventDefault()}
       >
         <div className="flex min-h-0 w-full flex-col">
-          <DialogHeader className="shrink-0 border-b border-white/8 px-5 py-4">
+          <DialogHeader className="shrink-0 border-b border-border/30 px-5 py-4">
             <DialogTitle className="flex items-center gap-2 text-2xl font-semibold tracking-tight">
               <TerminalSquare className="size-5 text-primary" />
               {project ? `${project.name} 终端` : "终端"}

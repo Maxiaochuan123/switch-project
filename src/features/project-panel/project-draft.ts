@@ -87,7 +87,9 @@ export function getSuggestedStartCommand(
 }
 
 export function hasInstalledNodeVersion(installedNodeVersions: string[], nodeVersion: string) {
-  return installedNodeVersions.includes(normalizeNodeVersion(nodeVersion));
+  return installedNodeVersions.some((installedVersion) =>
+    doesNodeVersionSatisfyRequirement(installedVersion, nodeVersion)
+  );
 }
 
 export function selectBestAvailableNodeVersion(

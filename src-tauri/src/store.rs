@@ -6,8 +6,8 @@ use std::{
 use serde::{Deserialize, Serialize};
 
 use crate::contracts::{
-    default_project_package_manager, normalize_node_version, AppStartupSettings,
-    ImportProjectsResult, ProjectConfig, ProjectPackageManager,
+    AppStartupSettings, ImportProjectsResult, ProjectConfig, ProjectPackageManager,
+    default_project_package_manager, normalize_node_version,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -112,6 +112,16 @@ impl AppStore {
             .position(|current| current.id == next_project.id)
         {
             self.data.projects[index] = next_project;
+        } else if let Some(index) = self
+            .data
+            .projects
+            .iter()
+            .position(|current| current.path.eq_ignore_ascii_case(&next_project.path))
+        {
+            self.data.projects[index] = ProjectConfig {
+                id: self.data.projects[index].id.clone(),
+                ..next_project
+            };
         } else {
             self.data.projects.push(next_project);
         }
@@ -175,8 +185,7 @@ impl AppStore {
     pub fn export_projects(&self, path: &str) -> Result<(), String> {
         let export_path = PathBuf::from(path);
         if let Some(parent) = export_path.parent() {
-            fs::create_dir_all(parent)
-                .map_err(|error| format!("创建导出目录失败: {error}"))?;
+            fs::create_dir_all(parent).map_err(|error| format!("创建导出目录失败: {error}"))?;
         }
 
         let contents = serde_json::to_string_pretty(&self.data.projects)
@@ -212,8 +221,8 @@ impl AppStore {
             fs::create_dir_all(parent).map_err(|error| format!("创建数据目录失败: {error}"))?;
         }
 
-        let contents = serde_json::to_string_pretty(&self.data)
-            .map_err(|error| format!("序列化配置失败: {error}"))?;
+        let contents =
+            serde_json::to_string_pretty(&self.data).map_err(|error| format!("序列化配置失败: {error}"))?;
 
         fs::write(&self.path, contents).map_err(|error| format!("写入配置失败: {error}"))
     }
@@ -328,6 +337,7 @@ fn make_absolute_path(raw_path: &str) -> Result<String, String> {
         return Ok(path.to_string_lossy().to_string());
     }
 
-    let current_dir = std::env::current_dir().map_err(|error| format!("读取当前目录失败: {error}"))?;
+    let current_dir =
+        std::env::current_dir().map_err(|error| format!("读取当前目录失败: {error}"))?;
     Ok(current_dir.join(path).to_string_lossy().to_string())
 }

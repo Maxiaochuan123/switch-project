@@ -1,4 +1,4 @@
-﻿import { AlertTriangle } from "lucide-react";
+import { AlertTriangle } from "lucide-react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -32,7 +32,10 @@ export function ExitRunningProjectsDialog({
 }: ExitRunningProjectsDialogProps) {
   return (
     <AlertDialog open={Boolean(request)} onOpenChange={onOpenChange}>
-      <AlertDialogContent className="border-white/10 bg-[#0d1426]/96 backdrop-blur-xl">
+      <AlertDialogContent 
+        className="border-border/50 bg-black/60 backdrop-blur-xl"
+        onOpenAutoFocus={(event) => event.preventDefault()}
+      >
         <AlertDialogHeader>
           <AlertDialogMedia className="border border-amber-500/20 bg-amber-500/10 text-amber-100">
             <AlertTriangle className="size-7" />
@@ -46,7 +49,7 @@ export function ExitRunningProjectsDialog({
         </AlertDialogHeader>
 
         {request?.activeProjectNames.length ? (
-          <div className="rounded-2xl border border-white/8 bg-black/10 p-4 text-sm text-muted-foreground">
+          <div className="rounded-lg border border-border/30 bg-black/10 p-4 text-sm text-muted-foreground">
             <p className="mb-2 font-medium text-foreground">正在运行的项目</p>
             <div className="space-y-1">
               {request.activeProjectNames.map((name) => (

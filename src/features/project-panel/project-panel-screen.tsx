@@ -1,24 +1,62 @@
-﻿import { Download, FolderTree, Plus, Settings2, Upload } from "lucide-react";
-import { DeleteProjectDialog } from "@/components/delete-project-dialog";
-import { ExitRunningProjectsDialog } from "@/components/exit-running-projects-dialog";
-import { InstallNodeVersionDialog } from "@/components/install-node-version-dialog";
+import { lazy, Suspense } from "react";
+import { motion, AnimatePresence } from "framer-motion";
+import { Download,Plus, Settings2, Upload } from "lucide-react";
+import { DropzoneField } from "@/components/dropzone-field";
 import { ProjectCard } from "@/components/project-card";
-import { ProjectFormDialog } from "@/components/project-form-dialog";
-import { ProjectLogsDialog } from "@/components/project-logs-dialog";
-import { RetryProjectNodeVersionDialog } from "@/components/retry-project-node-version-dialog";
-import { StartupSettingsDialog } from "@/components/startup-settings-dialog";
+import { ProjectGlobalDropzone } from "@/components/project-global-dropzone";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { useProjectPanelController } from "./use-project-panel-controller";
 
+const ProjectFormDialog = lazy(() =>
+  import("@/components/project-form-dialog").then((module) => ({
+    default: module.ProjectFormDialog,
+  }))
+);
+
+const InstallNodeVersionDialog = lazy(() =>
+  import("@/components/install-node-version-dialog").then((module) => ({
+    default: module.InstallNodeVersionDialog,
+  }))
+);
+
+const RetryProjectNodeVersionDialog = lazy(() =>
+  import("@/components/retry-project-node-version-dialog").then((module) => ({
+    default: module.RetryProjectNodeVersionDialog,
+  }))
+);
+
+const StartupSettingsDialog = lazy(() =>
+  import("@/components/startup-settings-dialog").then((module) => ({
+    default: module.StartupSettingsDialog,
+  }))
+);
+
+const DeleteProjectDialog = lazy(() =>
+  import("@/components/delete-project-dialog").then((module) => ({
+    default: module.DeleteProjectDialog,
+  }))
+);
+
+const ProjectLogsDialog = lazy(() =>
+  import("@/components/project-logs-dialog").then((module) => ({
+    default: module.ProjectLogsDialog,
+  }))
+);
+
+const ExitRunningProjectsDialog = lazy(() =>
+  import("@/components/exit-running-projects-dialog").then((module) => ({
+    default: module.ExitRunningProjectsDialog,
+  }))
+);
+
 export function ProjectPanelScreen() {
   const controller = useProjectPanelController();
-  const skeletonCount = controller.projects.length > 0 ? Math.min(controller.projects.length, 2) : 1;
 
   return (
     <TooltipProvider>
+      <ProjectGlobalDropzone onPathSelected={controller.projectFormDialog.onPathSelected} />
       <div className="min-h-screen px-4 py-4 text-foreground">
         <div className="flex min-h-[calc(100vh-2rem)] w-full flex-col">
           <header className="flex items-center justify-between gap-4">
@@ -30,8 +68,8 @@ export function ProjectPanelScreen() {
               <Button
                 type="button"
                 variant="outline"
-                onClick={() => void controller.handleImportProjects()}
-                disabled={controller.isActionLocked("import-projects")}
+                onClick={() => void controller.page.handleImportProjects()}
+                disabled={controller.page.isActionLocked("import-projects")}
               >
                 <Upload className="size-4" />
                 导入配置
@@ -39,8 +77,8 @@ export function ProjectPanelScreen() {
               <Button
                 type="button"
                 variant="outline"
-                onClick={() => void controller.handleExportProjects()}
-                disabled={controller.isActionLocked("export-projects")}
+                onClick={() => void controller.page.handleExportProjects()}
+                disabled={controller.page.isActionLocked("export-projects")}
               >
                 <Download className="size-4" />
                 导出配置
@@ -49,13 +87,13 @@ export function ProjectPanelScreen() {
                 type="button"
                 variant="outline"
                 onClick={() =>
-                  void controller.runLockedAction(
+                  void controller.page.runLockedAction(
                     "open-startup-settings",
-                    controller.openStartupSettingsDialog,
+                    controller.page.openStartupSettingsDialog,
                     400
                   )
                 }
-                disabled={controller.isActionLocked("open-startup-settings")}
+                disabled={controller.page.isActionLocked("open-startup-settings")}
               >
                 <Settings2 className="size-4" />
                 启动设置
@@ -63,210 +101,194 @@ export function ProjectPanelScreen() {
               <Button
                 type="button"
                 onClick={() =>
-                  void controller.runLockedAction(
+                  void controller.page.runLockedAction(
                     "open-create-project",
-                    controller.openCreateDialog,
+                    controller.page.openCreateDialog,
                     400
                   )
                 }
-                disabled={controller.isActionLocked("open-create-project")}
+                disabled={controller.page.isActionLocked("open-create-project")}
               >
                 <Plus className="size-4" />
-                新增项目
+                添加项目
               </Button>
             </div>
           </header>
 
-          <section className="mt-3 flex-1 rounded-[22px] border border-white/10 bg-card/60 p-2.5 shadow-2xl shadow-black/20 backdrop-blur-xl">
-            {controller.isLoading ? (
-              <div className="grid items-start grid-cols-[repeat(auto-fit,minmax(320px,390px))] gap-2.5">
-                {Array.from({ length: skeletonCount }).map((_, index) => (
-                  <Card key={`placeholder-${index}`} className="gap-3 border-white/10 bg-white/5 py-4">
-                    <CardContent className="space-y-3">
-                      <div className="h-6 w-40 animate-pulse rounded-full bg-white/8" />
-                      <div className="h-20 animate-pulse rounded-2xl bg-white/6" />
-                      <div className="h-10 animate-pulse rounded-xl bg-white/6" />
-                    </CardContent>
-                  </Card>
-                ))}
-              </div>
-            ) : null}
+          <section className="mt-3 flex-1 rounded-xl border border-border/50 bg-black/40 p-2.5 shadow-2xl shadow-black/20 backdrop-blur-xl">
+            <AnimatePresence mode="wait">
+              {!controller.page.isLoading && !controller.page.hasProjects ? (
+                <motion.div 
+                  key="empty"
+                  initial={{ opacity: 0, scale: 0.98 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 1.02 }}
+                  className="flex h-full min-h-[600px] flex-col items-center justify-center p-8 text-center"
+                >
+                  <div className="max-w-md space-y-6">
+                    <h2 className="text-5xl font-extrabold tracking-tighter text-white">
+                      构建你的项目空间
+                    </h2>
+                    <p className="text-xl text-muted-foreground/60 leading-relaxed">
+                      VoltAgent 将助你高效管理启动前端项目。<br />
+                      将项目文件夹拖入下方，即可开启沉浸式开发体验。
+                    </p>
+                  </div>
 
-            {!controller.isLoading && controller.projects.length === 0 ? (
-              <div className="flex min-h-[420px] items-center justify-center">
-                <Card className="max-w-xl border-white/10 bg-white/5 py-8 text-center backdrop-blur-sm">
-                  <CardHeader className="items-center gap-3">
-                    <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-                      <FolderTree className="size-10 text-primary" />
+                  <div className="mt-12 w-full max-w-lg">
+                    <div className="rounded-2xl border border-white/5 bg-white/5 p-6 backdrop-blur-md shadow-2xl">
+                      <DropzoneField
+                        selectedPath=""
+                        isLoading={controller.projectFormDialog.isInspectingProject && !controller.projectFormDialog.open}
+                        dropzoneError={controller.projectFormDialog.dropzoneError}
+                        onBrowse={controller.projectFormDialog.onBrowsePath}
+                      />
                     </div>
-                    <CardTitle className="text-2xl">还没有项目</CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-5 text-sm text-muted-foreground">
-                    <p>先添加第一个项目，后面就可以直接启动项目、打开地址和查看终端。</p>
-                    <Button
-                      type="button"
-                      onClick={() =>
-                        void controller.runLockedAction(
-                          "empty-open-create-project",
-                          controller.openCreateDialog,
-                          400
-                        )
-                      }
-                      disabled={controller.isActionLocked("empty-open-create-project")}
+                  </div>
+                </motion.div>
+              ) : !controller.page.isLoading && controller.page.hasProjects ? (
+                <motion.div 
+                  key="list"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  className="grid items-start grid-cols-[repeat(auto-fit,minmax(320px,390px))] gap-6 p-2"
+                >
+                  {controller.page.projectCards.map((card) => (
+                    <motion.div
+                      key={card.key}
+                      initial={{ opacity: 0, scale: 0.95 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      transition={{ type: "spring", stiffness: 260, damping: 20 }}
                     >
-                      <Plus className="size-4" />
-                      新增第一个项目
-                    </Button>
-                  </CardContent>
-                </Card>
-              </div>
-            ) : null}
-
-            {!controller.isLoading && controller.projects.length > 0 ? (
-              <div className="grid items-start grid-cols-[repeat(auto-fit,minmax(320px,390px))] gap-2.5">
-                {controller.projects.map((project) => (
-                  <ProjectCard
-                    key={project.id}
-                    project={project}
-                    runtime={controller.runtimes[project.id]}
-                    runtimeFailureMessage={controller.projectStartFailures[project.id]}
-                    operationPanel={controller.projectOperationPanels[project.id]}
-                    diagnosis={controller.projectDiagnoses[project.id]}
-                    isStartLocked={
-                      controller.isActionLocked(`start:${project.id}`) ||
-                      controller.isProjectDependencyOperationLocked(project.id)
-                    }
-                    isStopLocked={controller.isActionLocked(`stop:${project.id}`)}
-                    isEditLocked={controller.isActionLocked(`edit:${project.id}`)}
-                    isDeleteLocked={controller.isActionLocked(`delete:${project.id}`)}
-                    isDeleteNodeModulesLocked={
-                      controller.isActionLocked(`delete-node-modules:${project.id}`) ||
-                      controller.isProjectDependencyOperationLocked(project.id)
-                    }
-                    isReinstallNodeModulesLocked={
-                      controller.isActionLocked(`reinstall-node-modules:${project.id}`) ||
-                      controller.isProjectDependencyOperationLocked(project.id)
-                    }
-                    isTerminalLocked={controller.isActionLocked(`terminal:${project.id}`)}
-                    isDirectoryLocked={controller.isActionLocked(`directory:${project.id}`)}
-                    isAddressLocked={controller.isActionLocked(`url:${project.id}`)}
-                    onEdit={() =>
-                      void controller.runLockedAction(
-                        `edit:${project.id}`,
-                        () => {
-                          controller.openEditDialog(project);
-                        },
-                        400
-                      )
-                    }
-                    onDelete={() =>
-                      void controller.runLockedAction(
-                        `delete:${project.id}`,
-                        () => {
-                          controller.setDeleteTarget(project);
-                        },
-                        400
-                      )
-                    }
-                    onDeleteNodeModules={() => void controller.handleDeleteProjectDependencies(project)}
-                    onReinstallNodeModules={() =>
-                      void controller.handleReinstallProjectDependenciesToast(project)
-                    }
-                    onOpenTerminalOutput={() =>
-                      void controller.runLockedAction(
-                        `terminal:${project.id}`,
-                        () => {
-                          controller.setTerminalTarget(project);
-                        },
-                        400
-                      )
-                    }
-                    onStart={() => void controller.handleStartProject(project.id)}
-                    onStop={() => void controller.handleStopProject(project.id)}
-                    onOpenDirectory={() => void controller.handleOpenProjectDirectory(project)}
-                    onOpenUrl={(url) => void controller.handleOpenExternal(project.id, url)}
-                  />
-                ))}
-              </div>
-            ) : null}
+                      <ProjectCard
+                        project={card.project}
+                        runtime={card.runtime}
+                        runtimeFailureMessage={card.runtimeFailureMessage}
+                        operationPanel={card.operationPanel}
+                        diagnosis={card.diagnosis}
+                        isDiagnosisPending={card.isDiagnosisPending}
+                        isStartPending={card.isStartPending}
+                        isStopPending={card.isStopPending}
+                        isStartLocked={card.isStartLocked}
+                        isStopLocked={card.isStopLocked}
+                        isEditLocked={card.isEditLocked}
+                        isDeleteLocked={card.isDeleteLocked}
+                        isDeleteNodeModulesLocked={card.isDeleteNodeModulesLocked}
+                        isReinstallNodeModulesLocked={card.isReinstallNodeModulesLocked}
+                        isTerminalLocked={card.isTerminalLocked}
+                        isDirectoryLocked={card.isDirectoryLocked}
+                        isAddressLocked={card.isAddressLocked}
+                        onEdit={card.onEdit}
+                        onDelete={card.onDelete}
+                        onDeleteNodeModules={card.onDeleteNodeModules}
+                        onReinstallNodeModules={card.onReinstallNodeModules}
+                        onOpenTerminalOutput={card.onOpenTerminalOutput}
+                        onStart={card.onStart}
+                        onStop={card.onStop}
+                        onOpenDirectory={card.onOpenDirectory}
+                        onOpenUrl={card.onOpenUrl}
+                      />
+                    </motion.div>
+                  ))}
+                </motion.div>
+              ) : null}
+            </AnimatePresence>
           </section>
         </div>
       </div>
 
-      <ProjectFormDialog
-        open={controller.isProjectDialogOpen}
-        draft={controller.projectDraft}
-        submitErrorMessage={controller.formError}
-        installedNodeVersions={controller.environment.installedNodeVersions}
-        activeNodeVersion={controller.environment.activeNodeVersion}
-        installedPackageManagers={controller.environment.availablePackageManagers}
-        isSubmitting={controller.isSubmitting}
-        isInspectingProject={controller.isInspectingProject}
-        inspectionNotice={controller.inspectionNotice}
-        dropzoneError={controller.dropzoneError}
-        pathInspection={controller.pathInspection}
-        isInstallingNodeVersion={controller.isInstallingNodeVersion}
-        onPackageManagerChange={controller.handlePackageManagerChange}
-        onInstallNodeVersion={(version) => void controller.handleInstallNodeVersionOnly(version)}
-        onBrowsePath={() => void controller.handleBrowseProjectPath()}
-        onPathSelected={(path) => void controller.handleDropzonePath(path)}
-        onOpenChange={controller.handleProjectDialogOpenChange}
-        onSubmit={(draft) => void controller.handleSaveProject(draft)}
-      />
+      <Suspense fallback={null}>
+        {controller.projectFormDialog.open ? (
+          <ProjectFormDialog
+            open={controller.projectFormDialog.open}
+            draft={controller.projectFormDialog.draft}
+            submitErrorMessage={controller.projectFormDialog.submitErrorMessage}
+            installedNodeVersions={controller.projectFormDialog.installedNodeVersions}
+            activeNodeVersion={controller.projectFormDialog.activeNodeVersion}
+            installedPackageManagers={controller.projectFormDialog.installedPackageManagers}
+            isSubmitting={controller.projectFormDialog.isSubmitting}
+            isInspectingProject={controller.projectFormDialog.isInspectingProject}
+            inspectionNotice={controller.projectFormDialog.inspectionNotice}
+            dropzoneError={controller.projectFormDialog.dropzoneError}
+            pathInspection={controller.projectFormDialog.pathInspection}
+            isInstallingNodeVersion={controller.projectFormDialog.isInstallingNodeVersion}
+            onPackageManagerChange={controller.projectFormDialog.onPackageManagerChange}
+            onInstallNodeVersion={(version) =>
+              void controller.projectFormDialog.onInstallNodeVersion(version)
+            }
+            onBrowsePath={() => void controller.projectFormDialog.onBrowsePath()}
+            onOpenChange={controller.projectFormDialog.onOpenChange}
+            onSubmit={(draft) => void controller.projectFormDialog.onSubmit(draft)}
+          />
+        ) : null}
 
-      <InstallNodeVersionDialog
-        open={Boolean(controller.nodeInstallRequest)}
-        projectName={controller.nodeInstallRequest?.project.name ?? ""}
-        nodeVersion={controller.nodeInstallRequest?.version ?? ""}
-        isInstalling={controller.isInstallingNodeVersion}
-        onConfirm={() => void controller.handleInstallNodeVersionAndStart()}
-        onOpenChange={controller.handleNodeInstallDialogOpenChange}
-      />
+        {controller.nodeInstallDialog.open ? (
+          <InstallNodeVersionDialog
+            open={controller.nodeInstallDialog.open}
+            projectName={controller.nodeInstallDialog.projectName}
+            nodeVersion={controller.nodeInstallDialog.nodeVersion}
+            isInstalling={controller.nodeInstallDialog.isInstalling}
+            onConfirm={() => void controller.nodeInstallDialog.onConfirm()}
+            onOpenChange={controller.nodeInstallDialog.onOpenChange}
+          />
+        ) : null}
 
-      <RetryProjectNodeVersionDialog
-        open={Boolean(controller.nodeRetryTarget)}
-        projectName={controller.nodeRetryTarget?.project.name ?? ""}
-        currentNodeVersion={controller.nodeRetryTarget?.project.nodeVersion ?? ""}
-        suggestedNodeVersion={controller.nodeRetryTarget?.suggestedNodeVersion ?? ""}
-        availableNodeVersions={controller.environment.installedNodeVersions}
-        isProcessing={controller.isInstallingNodeVersion}
-        onConfirm={(nodeVersion) => void controller.handleRetryProjectWithSuggestedNode(nodeVersion)}
-        onOpenChange={controller.handleNodeRetryDialogOpenChange}
-      />
+        {controller.nodeRetryDialog.open ? (
+          <RetryProjectNodeVersionDialog
+            open={controller.nodeRetryDialog.open}
+            projectName={controller.nodeRetryDialog.projectName}
+            currentNodeVersion={controller.nodeRetryDialog.currentNodeVersion}
+            suggestedNodeVersion={controller.nodeRetryDialog.suggestedNodeVersion}
+            availableNodeVersions={controller.nodeRetryDialog.availableNodeVersions}
+            isProcessing={controller.nodeRetryDialog.isProcessing}
+            onConfirm={(nodeVersion) =>
+              void controller.nodeRetryDialog.onConfirm(nodeVersion)
+            }
+            onOpenChange={controller.nodeRetryDialog.onOpenChange}
+          />
+        ) : null}
 
-      <StartupSettingsDialog
-        open={controller.isStartupSettingsDialogOpen}
-        settings={controller.startupSettingsDraft}
-        isSaving={controller.isSavingStartupSettings}
-        onSettingsChange={controller.setStartupSettingsDraft}
-        onOpenChange={controller.handleStartupSettingsOpenChange}
-        onSubmit={() => void controller.handleSaveStartupSettings()}
-      />
+        {controller.startupSettingsDialog.open ? (
+          <StartupSettingsDialog
+            open={controller.startupSettingsDialog.open}
+            settings={controller.startupSettingsDialog.settings}
+            isSaving={controller.startupSettingsDialog.isSaving}
+            onSettingsChange={controller.startupSettingsDialog.onSettingsChange}
+            onOpenChange={controller.startupSettingsDialog.onOpenChange}
+            onSubmit={() => void controller.startupSettingsDialog.onSubmit()}
+          />
+        ) : null}
 
-      <DeleteProjectDialog
-        project={controller.deleteTarget}
-        isDeleting={controller.isSubmitting}
-        onConfirm={() => void controller.handleDeleteProject()}
-        onOpenChange={controller.handleDeleteDialogOpenChange}
-      />
+        {controller.deleteDialog.project ? (
+          <DeleteProjectDialog
+            project={controller.deleteDialog.project}
+            isDeleting={controller.deleteDialog.isDeleting}
+            onConfirm={() => void controller.deleteDialog.onConfirm()}
+            onOpenChange={controller.deleteDialog.onOpenChange}
+          />
+        ) : null}
 
-      <ProjectLogsDialog
-        open={Boolean(controller.terminalTarget)}
-        project={controller.terminalTarget}
-        runtime={
-          controller.terminalTarget ? controller.runtimes[controller.terminalTarget.id] : undefined
-        }
-        onOpenChange={controller.handleLogsDialogOpenChange}
-      />
+        {controller.logsDialog.open ? (
+          <ProjectLogsDialog
+            open={controller.logsDialog.open}
+            project={controller.logsDialog.project}
+            runtime={controller.logsDialog.runtime}
+            onOpenChange={controller.logsDialog.onOpenChange}
+          />
+        ) : null}
 
-      <ExitRunningProjectsDialog
-        request={controller.appCloseRequest}
-        isConfirming={controller.isConfirmingAppClose}
-        isMinimizing={controller.isMinimizingAppClose}
-        onConfirm={() => void controller.handleConfirmAppClose()}
-        onMinimize={() => void controller.handleMinimizeAppClose()}
-        onOpenChange={controller.handleExitDialogOpenChange}
-      />
+        {controller.exitDialog.request ? (
+          <ExitRunningProjectsDialog
+            request={controller.exitDialog.request}
+            isConfirming={controller.exitDialog.isConfirming}
+            isMinimizing={controller.exitDialog.isMinimizing}
+            onConfirm={() => void controller.exitDialog.onConfirm()}
+            onMinimize={() => void controller.exitDialog.onMinimize()}
+            onOpenChange={controller.exitDialog.onOpenChange}
+          />
+        ) : null}
+      </Suspense>
 
       <Toaster />
     </TooltipProvider>

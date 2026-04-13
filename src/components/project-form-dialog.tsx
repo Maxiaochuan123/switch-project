@@ -1,8 +1,8 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Controller, useForm } from "react-hook-form";
 import { z } from "zod";
-import { AlertTriangle, Info, LoaderCircle } from "lucide-react";
+import { AlertTriangle, FolderOpen, Info, LoaderCircle } from "lucide-react";
 import { DropzoneField } from "@/components/dropzone-field";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -25,14 +25,20 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
-import type { ProjectDraft } from "@/features/project-panel/project-draft";
+import {
+  getSuggestedPackageManager,
+  getSuggestedStartCommand,
+  hasInstalledNodeVersion,
+  selectBestAvailableNodeVersion,
+  shouldApplySuggestedValue,
+  type ProjectDraft,
+} from "@/features/project-panel/project-draft";
 import {
   getPackageManagerLabel,
   normalizeNodeVersion,
   type ProjectDirectoryInspection,
   type ProjectPackageManager,
 } from "@/shared/contracts";
-import { selectBestAvailableNodeVersion } from "@/features/project-panel/project-draft";
 
 const projectDraftSchema = z.object({
   name: z.string().trim().min(1, "请输入项目名称"),
@@ -62,7 +68,6 @@ type ProjectFormDialogProps = {
   onPackageManagerChange: (packageManager: ProjectPackageManager) => void;
   onInstallNodeVersion: (version: string) => void;
   onBrowsePath: () => void;
-  onPathSelected: (path: string) => void;
   onOpenChange: (open: boolean) => void;
   onSubmit: (draft: ProjectDraft) => void;
 };
@@ -104,7 +109,7 @@ function SettingsRow({
   onCheckedChange: (checked: boolean) => void;
 }) {
   return (
-    <div className="rounded-2xl border border-white/8 bg-black/10 p-4">
+    <div className="rounded-lg border border-border/30 bg-black/10 p-4">
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0 flex-1">
           <div className="text-sm font-medium text-foreground">{title}</div>
@@ -132,11 +137,15 @@ export function ProjectFormDialog({
   onPackageManagerChange,
   onInstallNodeVersion,
   onBrowsePath,
-  onPathSelected,
   onOpenChange,
   onSubmit,
 }: ProjectFormDialogProps) {
+  const isEditing = Boolean(draft.id);
   const formId = draft.id ? "edit-project-form" : "create-project-form";
+  const lastSuggestedRef = useRef({
+    packageManager: "",
+    startCommand: "",
+  });
 
   const form = useForm<ProjectDraftFormValues>({
     resolver: zodResolver(projectDraftSchema),
@@ -161,11 +170,23 @@ export function ProjectFormDialog({
       autoStartOnAppLaunch: draft.autoStartOnAppLaunch,
       autoOpenLocalUrlOnStart: draft.autoOpenLocalUrlOnStart,
     });
+    lastSuggestedRef.current = {
+      packageManager: "",
+      startCommand: "",
+    };
   }, [draft, form]);
 
   const watchedPath = form.watch("path");
   const watchedNodeVersion = form.watch("nodeVersion");
   const watchedPackageManager = form.watch("packageManager");
+  const suggestedPackageManager = getSuggestedPackageManager(
+    pathInspection,
+    installedPackageManagers
+  );
+  const suggestedStartCommand = getSuggestedStartCommand(
+    pathInspection,
+    (watchedPackageManager || suggestedPackageManager) as ProjectPackageManager | ""
+  );
 
   const autoSelectedNodeVersion = useMemo(
     () =>
@@ -181,6 +202,7 @@ export function ProjectFormDialog({
       pathInspection?.recommendedNodeVersion,
     ]
   );
+  const suggestedNodeVersion = draft.nodeVersion || autoSelectedNodeVersion;
 
   useEffect(() => {
     if (isInspectingProject) {
@@ -199,21 +221,72 @@ export function ProjectFormDialog({
     });
   }, [autoSelectedNodeVersion, form, isInspectingProject]);
 
-  const installTargetVersion =
-    pathInspection?.nodeVersionHint ??
-    pathInspection?.recommendedNodeVersion ??
-    watchedNodeVersion ??
+  useEffect(() => {
+    if (isInspectingProject || draft.id || !pathInspection) {
+      return;
+    }
+
+    const currentFormValues = form.getValues();
+
+    let shouldResetForm = false;
+    const nextFormValues = { ...currentFormValues };
+
+    const currentPackageManager = String(currentFormValues.packageManager ?? "");
+    if (
+      shouldApplySuggestedValue(
+        currentPackageManager,
+        lastSuggestedRef.current.packageManager
+      ) &&
+      currentPackageManager !== suggestedPackageManager
+    ) {
+      nextFormValues.packageManager = suggestedPackageManager;
+      shouldResetForm = true;
+    }
+
+    const currentStartCommand = String(currentFormValues.startCommand ?? "");
+    if (
+      shouldApplySuggestedValue(currentStartCommand, lastSuggestedRef.current.startCommand) &&
+      currentStartCommand !== suggestedStartCommand
+    ) {
+      nextFormValues.startCommand = suggestedStartCommand;
+      shouldResetForm = true;
+    }
+
+    if (shouldResetForm) {
+      form.reset(nextFormValues);
+    }
+
+    lastSuggestedRef.current = {
+      packageManager: suggestedPackageManager,
+      startCommand: suggestedStartCommand,
+    };
+  }, [
+    draft.id,
+    form,
+    installedPackageManagers,
+    isInspectingProject,
+    pathInspection,
+  ]);
+
+  const selectedNodeVersion = watchedNodeVersion.trim();
+  const nodeRequirement =
+    pathInspection?.nodeVersionHint?.trim() ||
+    pathInspection?.recommendedNodeVersion?.trim() ||
     "";
+  const installTargetVersion =
+    pathInspection?.recommendedNodeVersion || selectedNodeVersion || "";
+  const selectedNodeVersionLabel = selectedNodeVersion || suggestedNodeVersion || "";
 
   const isInstallTargetMissing =
-    Boolean(installTargetVersion) &&
-    !installedNodeVersions.some(
-      (version) => normalizeNodeVersion(version) === normalizeNodeVersion(installTargetVersion)
+    Boolean(nodeRequirement || selectedNodeVersionLabel) &&
+    !hasInstalledNodeVersion(
+      installedNodeVersions,
+      selectedNodeVersionLabel || nodeRequirement
     );
 
   const shouldShowInstallButton =
     Boolean(installTargetVersion) &&
-    watchedNodeVersion.trim().length === 0 &&
+    selectedNodeVersion.length === 0 &&
     isInstallTargetMissing &&
     !isInspectingProject;
 
@@ -252,17 +325,18 @@ export function ProjectFormDialog({
     return options;
   }, [installedPackageManagers, watchedPackageManager]);
 
-  const dialogTitle = draft.id ? "编辑项目" : "新增项目";
-  const submitLabel = draft.id ? "保存项目" : "创建项目";
+  const dialogTitle = draft.id ? "编辑项目" : "添加项目";
+  const submitLabel = draft.id ? "保存" : "添加";
   const isFormDisabled = isSubmitting || isInspectingProject;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        className="grid max-h-[88vh] max-w-xl grid-rows-[auto_minmax(0,1fr)_auto] gap-0 overflow-hidden border-white/10 bg-[#0d1426]/95 p-0 backdrop-blur-xl"
-        onInteractOutside={(event) => event.preventDefault()}
+        className="grid max-h-[88vh] max-w-xl grid-rows-[auto_minmax(0,1fr)_auto] gap-0 overflow-hidden border-border/50 bg-black/60 p-0 backdrop-blur-xl"
+        
+        onOpenAutoFocus={(event) => event.preventDefault()}
       >
-        <DialogHeader className="border-b border-white/8 px-6 py-5">
+        <DialogHeader className="border-b border-border/30 px-6 py-5">
           <DialogTitle className="text-2xl font-semibold tracking-tight">{dialogTitle}</DialogTitle>
           <DialogDescription>
             选择项目根目录后，系统会自动识别项目名称、包管理器、启动命令和推荐 Node 版本。
@@ -272,7 +346,12 @@ export function ProjectFormDialog({
         <ScrollArea className="min-h-0">
           <form
             id={formId}
-            onSubmit={form.handleSubmit((values) => onSubmit(values as ProjectDraft))}
+            onSubmit={form.handleSubmit((values) =>
+              onSubmit({
+                ...values,
+                id: draft.id,
+              } as ProjectDraft)
+            )}
             className="space-y-5 px-6 py-5"
           >
               {submitErrorMessage ? (
@@ -283,23 +362,52 @@ export function ProjectFormDialog({
                 </Alert>
               ) : null}
 
-              <section className="space-y-4 rounded-2xl border border-white/8 bg-black/10 p-4">
+              <section className="space-y-4 rounded-lg border border-border/30 bg-black/10 p-4">
                 <div className="text-sm font-medium text-foreground">基础信息</div>
 
                 <div className="space-y-2">
                   <FieldLabel label="项目目录" required />
-                  <DropzoneField
-                    selectedPath={watchedPath}
-                    isLoading={isInspectingProject}
-                    dropzoneError={dropzoneError}
-                    onBrowse={onBrowsePath}
-                    onPathSelected={onPathSelected}
-                  />
+                  {isEditing ? (
+                    <div className="rounded-lg border border-border/30 bg-black/10 p-4">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+                            <FolderOpen className="size-4 shrink-0 text-muted-foreground" />
+                            <span>当前项目目录</span>
+                          </div>
+                          <p
+                            className="mt-2 break-all text-xs leading-5 text-muted-foreground"
+                            title={watchedPath}
+                          >
+                            {watchedPath}
+                          </p>
+                        </div>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="shrink-0"
+                          onClick={onBrowsePath}
+                          disabled={isFormDisabled}
+                        >
+                          更换目录
+                        </Button>
+                      </div>
+                    </div>
+                  ) : (
+                    <DropzoneField
+                      selectedPath={watchedPath}
+                      isLoading={isInspectingProject}
+                      dropzoneError={dropzoneError}
+                      onBrowse={onBrowsePath}
+                    />
+                  )}
                   <input type="hidden" {...form.register("path")} />
                   <FieldError message={form.formState.errors.path?.message} />
                 </div>
 
-                {inspectionNotice === "success" ? (
+                {watchedPath && !isInspectingProject ? (
+                  <>
+                    {inspectionNotice === "success" ? (
                   <div className="flex items-center gap-2 rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-200">
                     <Info className="size-3.5 shrink-0" />
                     已为您自动填充配置，请检查是否需要调整。
@@ -323,9 +431,10 @@ export function ProjectFormDialog({
                     <Controller
                       control={form.control}
                       name="packageManager"
+                      defaultValue={draft.packageManager || suggestedPackageManager}
                       render={({ field }) => (
                         <Select
-                          value={field.value || undefined}
+                          value={field.value || suggestedPackageManager || undefined}
                           onValueChange={(value) => {
                             field.onChange(value);
                             onPackageManagerChange(value as ProjectPackageManager);
@@ -349,7 +458,7 @@ export function ProjectFormDialog({
                   </div>
                 </div>
 
-                {!pathInspection?.hasPackageJson && watchedPath.trim() && !isInspectingProject ? (
+                {pathInspection && !pathInspection.hasPackageJson && watchedPath.trim() && !isInspectingProject ? (
                   <Alert className="border-amber-500/20 bg-amber-500/10 text-amber-50">
                     <AlertTriangle className="size-4 text-amber-200" />
                     <AlertTitle>当前目录里没有 package.json</AlertTitle>
@@ -358,9 +467,13 @@ export function ProjectFormDialog({
                     </AlertDescription>
                   </Alert>
                 ) : null}
+                  </>
+                ) : null}
               </section>
 
-              <section className="space-y-4 rounded-2xl border border-white/8 bg-black/10 p-4">
+              {watchedPath && !isInspectingProject ? (
+                <>
+                  <section className="space-y-4 rounded-lg border border-border/30 bg-black/10 p-4">
                 <div className="text-sm font-medium text-foreground">启动配置</div>
 
                 <div className="grid gap-4 md:grid-cols-2">
@@ -385,9 +498,10 @@ export function ProjectFormDialog({
                       <Controller
                         control={form.control}
                         name="nodeVersion"
+                        defaultValue={suggestedNodeVersion}
                         render={({ field }) => (
                           <Select
-                            value={field.value || undefined}
+                            value={field.value || suggestedNodeVersion || undefined}
                             onValueChange={field.onChange}
                             disabled={isFormDisabled}
                           >
@@ -415,15 +529,33 @@ export function ProjectFormDialog({
                       />
                     )}
                     <FieldError message={form.formState.errors.nodeVersion?.message} />
+                    {nodeRequirement ? (
+                      <p className="text-xs text-muted-foreground">
+                        项目要求: Node {nodeRequirement}
+                      </p>
+                    ) : null}
+                    {selectedNodeVersionLabel ? (
+                      <p className="text-xs text-muted-foreground">
+                        当前选择: Node v{normalizeNodeVersion(selectedNodeVersionLabel)}
+                      </p>
+                    ) : null}
                   </div>
 
                   <div className="space-y-2">
                     <FieldLabel htmlFor="start-command" label="启动命令" required />
-                    <Input
-                      id="start-command"
-                      placeholder="默认从 package.json 读取，也可以手动修改"
-                      disabled={isFormDisabled}
-                      {...form.register("startCommand")}
+                    <Controller
+                      control={form.control}
+                      name="startCommand"
+                      defaultValue={draft.startCommand || suggestedStartCommand}
+                      render={({ field }) => (
+                        <Input
+                          id="start-command"
+                          placeholder="默认从 package.json 读取，也可以手动修改"
+                          disabled={isFormDisabled}
+                          {...field}
+                          value={field.value || suggestedStartCommand}
+                        />
+                      )}
                     />
                     <FieldError message={form.formState.errors.startCommand?.message} />
                   </div>
@@ -434,9 +566,11 @@ export function ProjectFormDialog({
                     <AlertTriangle className="size-4 text-amber-200" />
                     <AlertTitle>当前缺少所需的 Node 版本</AlertTitle>
                     <AlertDescription>
-                      {watchedNodeVersion
+                      {selectedNodeVersion
                         ? `当前选择的是 Node v${normalizeNodeVersion(watchedNodeVersion)}，本机还没有安装。`
-                        : `项目建议使用 Node v${normalizeNodeVersion(installTargetVersion)}，本机还没有安装。`}
+                        : nodeRequirement
+                          ? `项目要求 Node ${nodeRequirement}，本机当前没有已安装的可用版本。`
+                          : "本机当前没有已安装的可用 Node 版本。"}
                     </AlertDescription>
                     <div className="mt-3">
                       <Button
@@ -457,7 +591,7 @@ export function ProjectFormDialog({
                 ) : null}
               </section>
 
-              <section className="space-y-4 rounded-2xl border border-white/8 bg-black/10 p-4">
+              <section className="space-y-4 rounded-lg border border-border/30 bg-black/10 p-4">
                 <div className="text-sm font-medium text-foreground">启动行为</div>
 
                 <div className="space-y-3">
@@ -488,10 +622,12 @@ export function ProjectFormDialog({
                   />
                 </div>
               </section>
+                </>
+              ) : null}
           </form>
         </ScrollArea>
 
-          <DialogFooter className="border-t border-white/8 px-6 py-4">
+          <DialogFooter className="border-t border-border/30 px-6 py-4">
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
               取消
             </Button>
