@@ -1,4 +1,5 @@
 import { AlertTriangle } from "lucide-react";
+import { NodeInstallProgress } from "@/components/node-install-progress";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -10,12 +11,14 @@ import {
   AlertDialogMedia,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import type { NodeInstallProgress as NodeInstallProgressState } from "@/features/project-panel/use-project-dialog-state";
 
 type InstallNodeVersionDialogProps = {
   open: boolean;
   projectName: string;
   nodeVersion: string;
   isInstalling: boolean;
+  progress: NodeInstallProgressState | null;
   onConfirm: () => void;
   onOpenChange: (open: boolean) => void;
 };
@@ -25,6 +28,7 @@ export function InstallNodeVersionDialog({
   projectName,
   nodeVersion,
   isInstalling,
+  progress,
   onConfirm,
   onOpenChange,
 }: InstallNodeVersionDialogProps) {
@@ -43,6 +47,8 @@ export function InstallNodeVersionDialog({
             {`${projectName} 需要 Node v${nodeVersion}。当前系统还没有安装这个版本，是否现在安装并继续启动项目？`}
           </AlertDialogDescription>
         </AlertDialogHeader>
+
+        {progress?.kind === "single" ? <NodeInstallProgress progress={progress} tone="amber" /> : null}
 
         <AlertDialogFooter>
           <AlertDialogCancel disabled={isInstalling}>取消</AlertDialogCancel>

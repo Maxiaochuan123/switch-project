@@ -3,6 +3,7 @@ import type {
   AppStartupSettings,
   DesktopEnvironment,
   ImportProjectsResult,
+  NodeManagerInstallResult,
   OperationEvent,
   ProjectConfig,
   ProjectDiagnosis,
@@ -66,6 +67,7 @@ export type DesktopApi = {
   browseProjectDirectory: (initialPath?: string) => Promise<string | null>;
   importProjects: (filePath: string) => Promise<ImportProjectsResult>;
   exportProjects: (filePath: string) => Promise<void>;
+  installNodeManager: () => Promise<NodeManagerInstallResult>;
   installNodeVersion: (version: string) => Promise<void>;
   minimizeAppToTray: () => Promise<void>;
   ensureDeleteTool: () => Promise<boolean>;

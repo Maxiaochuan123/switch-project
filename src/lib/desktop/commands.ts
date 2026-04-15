@@ -6,6 +6,7 @@ import {
   type DesktopApi,
   type DesktopEnvironment,
   type ImportProjectsResult,
+  type NodeManagerInstallResult,
   type ProjectConfig,
   type ProjectDiagnosis,
   type ProjectDirectoryInspection,
@@ -78,6 +79,8 @@ export const desktopCommands: Omit<
   },
   importProjects: (filePath) => invokeCommand<ImportProjectsResult>("import_projects", { filePath }),
   exportProjects: (filePath) => invokeCommand("export_projects", { filePath }),
+  installNodeManager: () =>
+    invokeCommand<NodeManagerInstallResult>("install_node_manager"),
   installNodeVersion: (version) => invokeCommand("install_node_version", { version }),
   minimizeAppToTray: () => invokeCommand("minimize_app_to_tray"),
   ensureDeleteTool: () => invokeCommand<boolean>("ensure_delete_tool"),

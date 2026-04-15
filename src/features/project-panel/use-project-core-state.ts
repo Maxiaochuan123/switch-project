@@ -9,10 +9,13 @@ import { areProjectListsEqual } from "./helpers";
 
 const DEFAULT_ENVIRONMENT: DesktopEnvironment = {
   installedNodeVersions: [],
+  nvmInstalledNodeVersions: [],
   activeNodeVersion: null,
   availablePackageManagers: [],
   rimrafInstalled: false,
-  nvmHome: null,
+  nodeManager: "fnm",
+  nodeManagerAvailable: false,
+  nodeManagerVersion: null,
 };
 
 export function useProjectCoreState() {

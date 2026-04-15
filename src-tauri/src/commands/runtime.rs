@@ -9,7 +9,7 @@ use crate::{
     ManagedState,
 };
 
-use super::common::get_project;
+use super::common::{get_cached_project_start_assessment, get_project};
 
 #[tauri::command]
 pub fn list_runtimes(state: State<ManagedState>) -> Result<Vec<ProjectRuntime>, String> {
@@ -23,7 +23,11 @@ pub async fn start_project(
     project_id: String,
 ) -> Result<(), String> {
     let project = get_project(&state, &project_id)?;
-    state.runtime_manager.start_project(&app, project).await
+    let cached_assessment = get_cached_project_start_assessment(&state, &project);
+    state
+        .runtime_manager
+        .start_project(&app, project, cached_assessment)
+        .await
 }
 
 #[tauri::command]

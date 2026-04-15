@@ -8,6 +8,7 @@ import {
 } from "@/shared/contracts";
 import { getErrorMessage, getToastContent, type Feedback } from "./helpers";
 import type {
+  NodeInstallProgress,
   NodeInstallRequest,
   NodeRetryRequest,
 } from "./use-project-dialog-state";
@@ -20,6 +21,7 @@ type UseProjectNodeActionsOptions = {
   refreshProjectDiagnosis: (projectId: string) => void;
   setFeedback: Dispatch<SetStateAction<Feedback | null>>;
   setIsInstallingNodeVersion: Dispatch<SetStateAction<boolean>>;
+  setNodeInstallProgress: Dispatch<SetStateAction<NodeInstallProgress | null>>;
   setNodeInstallRequest: Dispatch<SetStateAction<NodeInstallRequest | null>>;
   setNodeRetryTarget: Dispatch<SetStateAction<NodeRetryRequest | null>>;
   showProjectOperationPanel: (event: OperationEvent, clearDelay?: number) => void;
@@ -33,18 +35,34 @@ export function useProjectNodeActions({
   refreshProjectDiagnosis,
   setFeedback,
   setIsInstallingNodeVersion,
+  setNodeInstallProgress,
   setNodeInstallRequest,
   setNodeRetryTarget,
   showProjectOperationPanel,
   startProjectDirect,
 }: UseProjectNodeActionsOptions) {
   const installNodeVersion = useCallback(
-    async (version: string, project?: ProjectConfig | null) => {
+    async (
+      version: string,
+      project?: ProjectConfig | null,
+      progress?: NodeInstallProgress
+    ) => {
       const normalizedVersion = normalizeNodeVersion(version);
       const toastId = `install-node:${normalizedVersion}`;
       const isProjectScoped = Boolean(project?.id);
+      const isSyncProgress = progress?.kind === "sync";
 
-      setIsInstallingNodeVersion(true);
+      if (!isSyncProgress) {
+        setIsInstallingNodeVersion(true);
+      }
+      setNodeInstallProgress(
+        progress ?? {
+          kind: "single",
+          currentVersion: normalizedVersion,
+          completedCount: 0,
+          totalCount: 1,
+        }
+      );
 
       if (project?.id) {
         showProjectOperationPanel({
@@ -124,13 +142,17 @@ export function useProjectNodeActions({
         if (!isProjectScoped) {
           toast.dismiss(toastId);
         }
-        setIsInstallingNodeVersion(false);
+        if (!isSyncProgress) {
+          setNodeInstallProgress(null);
+          setIsInstallingNodeVersion(false);
+        }
       }
     },
     [
       loadProjectData,
       refreshProjectDiagnosis,
       setIsInstallingNodeVersion,
+      setNodeInstallProgress,
       showProjectOperationPanel,
     ]
   );
@@ -140,6 +162,52 @@ export function useProjectNodeActions({
       await installNodeVersion(version);
     },
     [installNodeVersion]
+  );
+
+  const handleSyncNodeVersionsFromNvm = useCallback(
+    async (versions: string[]) => {
+      const normalizedVersions = versions.map((version) => normalizeNodeVersion(version));
+      const totalCount = normalizedVersions.length;
+
+      if (totalCount === 0) {
+        return;
+      }
+
+      setIsInstallingNodeVersion(true);
+
+      try {
+        for (const [index, version] of normalizedVersions.entries()) {
+          const installed = await installNodeVersion(version, null, {
+            kind: "sync",
+            currentVersion: version,
+            completedCount: index,
+            totalCount,
+          });
+
+          if (!installed) {
+            setFeedback({
+              variant: "destructive",
+              title: "同步 fnm 失败",
+              message: `同步 Node v${version} 时中断，请检查安装日志或稍后重试。`,
+            });
+            return;
+          }
+        }
+
+        setFeedback({
+          variant: "default",
+          title: "fnm 已同步",
+          message:
+            totalCount === 1
+              ? `已把 Node v${normalizedVersions[0]} 同步安装到 fnm。`
+              : `已把 ${totalCount} 个 Node 版本同步安装到 fnm。`,
+        });
+      } finally {
+        setNodeInstallProgress(null);
+        setIsInstallingNodeVersion(false);
+      }
+    },
+    [installNodeVersion, setFeedback, setIsInstallingNodeVersion, setNodeInstallProgress]
   );
 
   const handleInstallNodeVersionAndStart = useCallback(async () => {
@@ -222,5 +290,6 @@ export function useProjectNodeActions({
     handleInstallNodeVersionAndStart,
     handleInstallNodeVersionOnly,
     handleRetryProjectWithSuggestedNode,
+    handleSyncNodeVersionsFromNvm,
   };
 }

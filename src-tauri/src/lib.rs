@@ -1,6 +1,6 @@
 mod commands;
 mod contracts;
-mod node_versions;
+mod node_manager;
 mod package_managers;
 mod project_directory;
 mod runtime;
@@ -8,9 +8,12 @@ mod store;
 
 pub use contracts::export_typescript_contracts;
 
-use std::sync::{
+use std::{
+    collections::HashMap,
+    sync::{
     atomic::{AtomicBool, Ordering},
     Mutex,
+    },
 };
 
 use contracts::AppCloseRequest;
@@ -25,6 +28,8 @@ use tauri::{
 pub(crate) struct ManagedState {
     pub(crate) store: Mutex<AppStore>,
     pub(crate) runtime_manager: RuntimeManager,
+    pub(crate) project_start_assessments:
+        Mutex<HashMap<String, commands::common::CachedProjectStartAssessment>>,
     pub(crate) pending_close_request: Mutex<Option<AppCloseRequest>>,
     pub(crate) allow_window_close: AtomicBool,
 }
@@ -41,6 +46,7 @@ pub fn run() {
         .manage(ManagedState {
             store: Mutex::new(AppStore::load().expect("failed to load app store")),
             runtime_manager: RuntimeManager::new(),
+            project_start_assessments: Mutex::new(HashMap::new()),
             pending_close_request: Mutex::new(None),
             allow_window_close: AtomicBool::new(false),
         })
@@ -97,6 +103,7 @@ pub fn run() {
             commands::environment::get_environment,
             commands::projects::import_projects,
             commands::projects::export_projects,
+            commands::environment::install_node_manager,
             commands::environment::install_node_version,
             commands::environment::get_app_startup_settings,
             commands::environment::save_app_startup_settings,
@@ -249,7 +256,7 @@ async fn run_project_autostart(app: AppHandle) {
         }
 
         let state = app.state::<ManagedState>();
-        let _ = state.runtime_manager.start_project(&app, project).await;
+        let _ = state.runtime_manager.start_project(&app, project, None).await;
     }
 }
 

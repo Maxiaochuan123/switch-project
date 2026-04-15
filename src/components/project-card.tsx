@@ -2,10 +2,8 @@ import { memo, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
   CheckCircle2,
-  Check,
   Copy,
   ExternalLink,
-  FolderOpen,
   LoaderCircle,
   Pencil,
   Play,
@@ -27,7 +25,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { Toaster, toast } from "sonner";
+import { toast } from "sonner";
 import { getProjectStatusLabel } from "@/lib/ui-copy";
 import { cn } from "@/lib/utils";
 import type {

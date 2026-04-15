@@ -92,6 +92,43 @@ export function hasInstalledNodeVersion(installedNodeVersions: string[], nodeVer
   );
 }
 
+export function mergeNodeVersionLists(...versionGroups: string[][]) {
+  const mergedVersions: string[] = [];
+
+  for (const versions of versionGroups) {
+    for (const version of versions) {
+      const normalizedVersion = normalizeNodeVersion(version);
+      if (
+        normalizedVersion &&
+        !mergedVersions.some((currentVersion) => currentVersion === normalizedVersion)
+      ) {
+        mergedVersions.push(normalizedVersion);
+      }
+    }
+  }
+
+  return mergedVersions;
+}
+
+export function getMissingNodeVersions(
+  installedNodeVersions: string[],
+  externalNodeVersions: string[]
+) {
+  const normalizedInstalledVersions = installedNodeVersions.map((version) =>
+    normalizeNodeVersion(version)
+  );
+
+  return externalNodeVersions
+    .map((version) => normalizeNodeVersion(version))
+    .filter(
+      (version, index, currentVersions) =>
+        Boolean(version) &&
+        !normalizedInstalledVersions.includes(version) &&
+        currentVersions.indexOf(version) === index
+    )
+    .sort(compareNodeVersionsDesc);
+}
+
 export function selectBestAvailableNodeVersion(
   recommendedVersion: string | null | undefined,
   installedNodeVersions: string[],

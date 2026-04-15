@@ -12,6 +12,7 @@ import {
   EMPTY_DRAFT_SUGGESTIONS,
   getSuggestedPackageManager,
   getSuggestedStartCommand,
+  mergeNodeVersionLists,
   selectBestAvailableNodeVersion,
   shouldApplySuggestedValue,
   type DraftSuggestionSnapshot,
@@ -67,9 +68,13 @@ export function useProjectFormState({
         environment.availablePackageManagers
       );
       const suggestedStartCommand = getSuggestedStartCommand(inspection, suggestedPackageManager);
+      const availableNodeVersions = mergeNodeVersionLists(
+        environment.installedNodeVersions,
+        environment.nvmInstalledNodeVersions
+      );
       const suggestedNodeVersion = selectBestAvailableNodeVersion(
         inspection.nodeVersionHint ?? inspection.recommendedNodeVersion,
-        environment.installedNodeVersions,
+        availableNodeVersions,
         environment.activeNodeVersion
       );
       const currentDraft = currentDraftRef.current;
@@ -163,7 +168,12 @@ export function useProjectFormState({
       allowEditInspectionAutofillRef.current = false;
       draftSuggestionRef.current = nextSuggestions;
     },
-    [environment.activeNodeVersion, environment.availablePackageManagers, environment.installedNodeVersions]
+    [
+      environment.activeNodeVersion,
+      environment.availablePackageManagers,
+      environment.installedNodeVersions,
+      environment.nvmInstalledNodeVersions,
+    ]
   );
 
   const inspectPath = useCallback(

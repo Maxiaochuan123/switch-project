@@ -4,6 +4,7 @@ import { Controller, useForm } from "react-hook-form";
 import { z } from "zod";
 import { AlertTriangle, FolderOpen, Info, LoaderCircle } from "lucide-react";
 import { DropzoneField } from "@/components/dropzone-field";
+import { NodeInstallProgress } from "@/components/node-install-progress";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
@@ -29,6 +30,7 @@ import {
   getSuggestedPackageManager,
   getSuggestedStartCommand,
   hasInstalledNodeVersion,
+  mergeNodeVersionLists,
   selectBestAvailableNodeVersion,
   shouldApplySuggestedValue,
   type ProjectDraft,
@@ -39,6 +41,7 @@ import {
   type ProjectDirectoryInspection,
   type ProjectPackageManager,
 } from "@/shared/contracts";
+import type { NodeInstallProgress as NodeInstallProgressState } from "@/features/project-panel/use-project-dialog-state";
 
 const projectDraftSchema = z.object({
   name: z.string().trim().min(1, "请输入项目名称"),
@@ -57,6 +60,7 @@ type ProjectFormDialogProps = {
   draft: ProjectDraft;
   submitErrorMessage: string | null;
   installedNodeVersions: string[];
+  nvmInstalledNodeVersions: string[];
   activeNodeVersion: string | null;
   installedPackageManagers: ProjectPackageManager[];
   isSubmitting: boolean;
@@ -65,6 +69,7 @@ type ProjectFormDialogProps = {
   dropzoneError: string;
   pathInspection: ProjectDirectoryInspection | null;
   isInstallingNodeVersion: boolean;
+  nodeInstallProgress: NodeInstallProgressState | null;
   onPackageManagerChange: (packageManager: ProjectPackageManager) => void;
   onInstallNodeVersion: (version: string) => void;
   onBrowsePath: () => void;
@@ -126,6 +131,7 @@ export function ProjectFormDialog({
   draft,
   submitErrorMessage,
   installedNodeVersions,
+  nvmInstalledNodeVersions,
   activeNodeVersion,
   installedPackageManagers,
   isSubmitting,
@@ -134,6 +140,7 @@ export function ProjectFormDialog({
   dropzoneError,
   pathInspection,
   isInstallingNodeVersion,
+  nodeInstallProgress,
   onPackageManagerChange,
   onInstallNodeVersion,
   onBrowsePath,
@@ -187,17 +194,21 @@ export function ProjectFormDialog({
     pathInspection,
     (watchedPackageManager || suggestedPackageManager) as ProjectPackageManager | ""
   );
+  const availableNodeVersions = useMemo(
+    () => mergeNodeVersionLists(installedNodeVersions, nvmInstalledNodeVersions),
+    [installedNodeVersions, nvmInstalledNodeVersions]
+  );
 
   const autoSelectedNodeVersion = useMemo(
     () =>
       selectBestAvailableNodeVersion(
         pathInspection?.nodeVersionHint ?? pathInspection?.recommendedNodeVersion,
-        installedNodeVersions,
+        availableNodeVersions,
         activeNodeVersion
       ),
     [
       activeNodeVersion,
-      installedNodeVersions,
+      availableNodeVersions,
       pathInspection?.nodeVersionHint,
       pathInspection?.recommendedNodeVersion,
     ]
@@ -274,8 +285,26 @@ export function ProjectFormDialog({
     pathInspection?.recommendedNodeVersion?.trim() ||
     "";
   const installTargetVersion =
-    pathInspection?.recommendedNodeVersion || selectedNodeVersion || "";
+    pathInspection?.recommendedNodeVersion || selectedNodeVersion || nodeRequirement;
   const selectedNodeVersionLabel = selectedNodeVersion || suggestedNodeVersion || "";
+  const normalizedActiveNodeVersion = activeNodeVersion
+    ? normalizeNodeVersion(activeNodeVersion)
+    : "";
+  const normalizedSelectedNodeVersion = selectedNodeVersionLabel
+    ? normalizeNodeVersion(selectedNodeVersionLabel)
+    : "";
+  const isUsingSystemNodeByDefault =
+    !nodeRequirement &&
+    Boolean(normalizedActiveNodeVersion) &&
+    normalizedSelectedNodeVersion === normalizedActiveNodeVersion;
+  const canMigrateSelectedVersion =
+    Boolean(selectedNodeVersionLabel) &&
+    !hasInstalledNodeVersion(installedNodeVersions, selectedNodeVersionLabel) &&
+    hasInstalledNodeVersion(nvmInstalledNodeVersions, selectedNodeVersionLabel);
+  const canMigrateInstallTarget =
+    Boolean(installTargetVersion) &&
+    !hasInstalledNodeVersion(installedNodeVersions, installTargetVersion) &&
+    hasInstalledNodeVersion(nvmInstalledNodeVersions, installTargetVersion);
 
   const isInstallTargetMissing =
     Boolean(nodeRequirement || selectedNodeVersionLabel) &&
@@ -291,7 +320,7 @@ export function ProjectFormDialog({
     !isInspectingProject;
 
   const nodeVersionOptions = useMemo(() => {
-    const options = [...installedNodeVersions];
+    const options = [...availableNodeVersions];
 
     if (
       watchedNodeVersion &&
@@ -303,7 +332,7 @@ export function ProjectFormDialog({
     }
 
     return options;
-  }, [installedNodeVersions, watchedNodeVersion]);
+  }, [availableNodeVersions, watchedNodeVersion]);
 
   const packageManagerOptions = useMemo<{ value: ProjectPackageManager; label: string }[]>(() => {
     const options: { value: ProjectPackageManager; label: string }[] =
@@ -492,7 +521,9 @@ export function ProjectFormDialog({
                         ) : null}
                         {isInstallingNodeVersion
                           ? "安装中..."
-                          : `安装 Node v${normalizeNodeVersion(installTargetVersion)}`}
+                          : canMigrateInstallTarget
+                            ? `迁移到 fnm: Node v${normalizeNodeVersion(installTargetVersion)}`
+                            : `安装 Node v${normalizeNodeVersion(installTargetVersion)}`}
                       </Button>
                     ) : (
                       <Controller
@@ -511,15 +542,21 @@ export function ProjectFormDialog({
                             <SelectContent>
                               {nodeVersionOptions.map((version) => {
                                 const normalizedVersion = normalizeNodeVersion(version);
-                                const installed = installedNodeVersions.some(
-                                  (item) => normalizeNodeVersion(item) === normalizedVersion
+                                const installed = hasInstalledNodeVersion(
+                                  installedNodeVersions,
+                                  version
                                 );
+                                const migratableFromNvm =
+                                  !installed &&
+                                  hasInstalledNodeVersion(nvmInstalledNodeVersions, version);
 
                                 return (
                                   <SelectItem key={version} value={version}>
                                     {installed
                                       ? `v${normalizedVersion}`
-                                      : `v${normalizedVersion}（未安装）`}
+                                      : migratableFromNvm
+                                        ? `v${normalizedVersion}（nvm 已安装，可迁移）`
+                                        : `v${normalizedVersion}（未安装）`}
                                   </SelectItem>
                                 );
                               })}
@@ -533,11 +570,25 @@ export function ProjectFormDialog({
                       <p className="text-xs text-muted-foreground">
                         项目要求: Node {nodeRequirement}
                       </p>
-                    ) : null}
-                    {selectedNodeVersionLabel ? (
+                    ) : selectedNodeVersionLabel ? (
                       <p className="text-xs text-muted-foreground">
-                        当前选择: Node v{normalizeNodeVersion(selectedNodeVersionLabel)}
+                        {isUsingSystemNodeByDefault
+                          ? `未检测到项目中的 Node 版本约束，默认使用当前系统 Node v${normalizedSelectedNodeVersion}`
+                          : `未检测到项目中的 Node 版本约束，当前使用可用的 Node v${normalizedSelectedNodeVersion}`}
                       </p>
+                    ) : null}
+                    {canMigrateSelectedVersion ? (
+                      <p className="text-xs text-sky-200">
+                        检测到 nvm 已安装对应版本，可以一键迁移到 fnm。
+                      </p>
+                    ) : null}
+                    {!installedNodeVersions.length && nvmInstalledNodeVersions.length > 0 ? (
+                      <p className="text-xs text-muted-foreground">
+                        当前 fnm 还没有已安装的 Node 版本，已检测到 nvm 中有 {nvmInstalledNodeVersions.length} 个版本可迁移。
+                      </p>
+                    ) : null}
+                    {nodeInstallProgress?.kind === "single" ? (
+                      <NodeInstallProgress progress={nodeInstallProgress} tone="amber" />
                     ) : null}
                   </div>
 
@@ -584,7 +635,9 @@ export function ProjectFormDialog({
                         ) : null}
                         {isInstallingNodeVersion
                           ? "安装中..."
-                          : `安装 Node v${normalizeNodeVersion(installTargetVersion)}`}
+                          : canMigrateInstallTarget
+                            ? `迁移到 fnm: Node v${normalizeNodeVersion(installTargetVersion)}`
+                            : `安装 Node v${normalizeNodeVersion(installTargetVersion)}`}
                       </Button>
                     </div>
                   </Alert>

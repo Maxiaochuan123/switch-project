@@ -1,6 +1,11 @@
 import { useEffect, useMemo, useRef } from "react";
 import { TerminalSquare } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  getLatestStartupTimingSummary,
+  getProjectTerminalText,
+  getStartupTimingSummaryParts,
+} from "@/features/project-panel/helpers";
 import type { ProjectConfig, ProjectRuntime } from "@/shared/contracts";
 
 type ProjectLogsDialogProps = {
@@ -10,17 +15,6 @@ type ProjectLogsDialogProps = {
   onOpenChange: (open: boolean) => void;
 };
 
-function createTerminalText(runtime?: ProjectRuntime) {
-  if (!runtime?.recentLogs?.length) {
-    return "";
-  }
-
-  return runtime.recentLogs
-    .map((entry) => entry.message.trimEnd())
-    .filter(Boolean)
-    .join("\n");
-}
-
 export function ProjectLogsDialog({
   open,
   project,
@@ -29,7 +23,18 @@ export function ProjectLogsDialog({
 }: ProjectLogsDialogProps) {
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const bottomAnchorRef = useRef<HTMLDivElement | null>(null);
-  const terminalText = useMemo(() => createTerminalText(runtime), [runtime]);
+  const terminalText = useMemo(
+    () => getProjectTerminalText(runtime?.recentLogs),
+    [runtime?.recentLogs]
+  );
+  const startupTimingSummary = useMemo(
+    () => getLatestStartupTimingSummary(runtime?.recentLogs),
+    [runtime?.recentLogs]
+  );
+  const startupTimingSummaryParts = useMemo(
+    () => getStartupTimingSummaryParts(startupTimingSummary),
+    [startupTimingSummary]
+  );
 
   function scrollToBottom() {
     const container = scrollContainerRef.current;
@@ -56,7 +61,7 @@ export function ProjectLogsDialog({
     return () => {
       timers.forEach((timer) => window.clearTimeout(timer));
     };
-  }, [open, terminalText]);
+  }, [open, startupTimingSummary, startupTimingSummaryParts, terminalText]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -74,11 +79,27 @@ export function ProjectLogsDialog({
           </DialogHeader>
 
           <div ref={scrollContainerRef} className="min-h-0 flex-1 overflow-auto px-5 py-4">
-            {terminalText ? (
+            {terminalText || startupTimingSummary ? (
               <>
-                <pre className="whitespace-pre-wrap break-words font-mono text-xs leading-6 text-foreground">
-                  {terminalText}
-                </pre>
+                {terminalText ? (
+                  <pre className="whitespace-pre-wrap break-words font-mono text-xs leading-6 text-foreground">
+                    {terminalText}
+                  </pre>
+                ) : null}
+                {startupTimingSummary ? (
+                  <div className="mt-4 rounded-xl bg-primary/10 px-4 py-3 text-primary shadow-2xl backdrop-blur-md">
+                    <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-[12px] font-semibold leading-5">
+                      {startupTimingSummaryParts.map((part) => (
+                        <span
+                          key={part}
+                          className="inline-flex rounded-md bg-primary/10 px-2.5 py-1 whitespace-nowrap"
+                        >
+                          {part}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
                 <div ref={bottomAnchorRef} className="h-px w-full" />
               </>
             ) : (

@@ -230,23 +230,23 @@ fn resolve_node_recommendation(
 ) -> NodeRecommendation {
     let candidates = [
         (
-            ProjectNodeVersionSource::Nvmrc,
-            read_node_version_file(&path.join(".nvmrc")),
-        ),
-        (
             ProjectNodeVersionSource::NodeVersion,
             read_node_version_file(&path.join(".node-version")),
         ),
         (
-            ProjectNodeVersionSource::Volta,
-            package_json
-                .and_then(|value| value.volta.as_ref())
-                .and_then(|value| value.node.clone()),
+            ProjectNodeVersionSource::Nvmrc,
+            read_node_version_file(&path.join(".nvmrc")),
         ),
         (
             ProjectNodeVersionSource::PackageEngines,
             package_json
                 .and_then(|value| value.engines.as_ref())
+                .and_then(|value| value.node.clone()),
+        ),
+        (
+            ProjectNodeVersionSource::Volta,
+            package_json
+                .and_then(|value| value.volta.as_ref())
                 .and_then(|value| value.node.clone()),
         ),
     ];

@@ -1,78 +1,63 @@
 use std::{
+    collections::HashMap,
     path::{Path, PathBuf},
     process::Command,
+    sync::{Mutex, OnceLock},
+    time::{Duration as StdDuration, Instant},
 };
+use tokio::process::Command as TokioCommand;
 
 use crate::{
     contracts::{normalize_node_version, package_manager_command_name, ProjectPackageManager},
-    node_versions::resolve_nvm_home,
-    package_managers::is_package_manager_available,
+    node_manager::resolve_fnm_executable,
 };
 
-use super::CREATE_NEW_CONSOLE;
+use super::{CREATE_NEW_CONSOLE, CREATE_NO_WINDOW};
 
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
 
-pub(super) fn resolve_project_node_directory(node_version: &str) -> PathBuf {
-    let nvm_home = resolve_nvm_home().unwrap_or_default();
-    nvm_home.join(format!("v{}", normalize_node_version(node_version)))
+const COMMAND_RESOLUTION_CACHE_TTL: StdDuration = StdDuration::from_secs(5);
+
+#[derive(Clone)]
+struct TimedCommandValue<T> {
+    value: T,
+    cached_at: Instant,
 }
 
-pub(crate) fn build_project_runtime_path(node_version: &str) -> String {
-    let current_path = std::env::var("PATH").unwrap_or_default();
-    let node_directory = resolve_project_node_directory(node_version)
-        .to_string_lossy()
-        .to_string();
-    let node_directory_lower = node_directory.to_lowercase();
-    let nvm_home = resolve_nvm_home()
-        .map(|path| path.to_string_lossy().to_string().to_lowercase())
-        .unwrap_or_default();
-    let nvm_symlink = std::env::var("NVM_SYMLINK").unwrap_or_default();
-
-    let filtered = current_path
-        .split(';')
-        .filter(|segment| !segment.trim().is_empty())
-        .filter(|segment| {
-            let normalized = segment.to_lowercase();
-            if normalized == node_directory_lower {
-                return false;
-            }
-
-            if !nvm_home.is_empty() && normalized.starts_with(&format!("{nvm_home}\\v")) {
-                return false;
-            }
-
-            true
-        })
-        .map(str::to_string)
-        .collect::<Vec<_>>();
-
-    let mut paths = vec![node_directory];
-
-    if !nvm_symlink.trim().is_empty()
-        && !paths
-            .iter()
-            .any(|existing| existing.eq_ignore_ascii_case(&nvm_symlink))
-    {
-        paths.push(nvm_symlink);
-    }
-
-    for segment in filtered {
-        if !paths
-            .iter()
-            .any(|existing| existing.eq_ignore_ascii_case(&segment))
-        {
-            paths.push(segment);
+impl<T> TimedCommandValue<T> {
+    fn new(value: T) -> Self {
+        Self {
+            value,
+            cached_at: Instant::now(),
         }
     }
 
-    paths.join(";")
+    fn is_fresh(&self) -> bool {
+        self.cached_at.elapsed() <= COMMAND_RESOLUTION_CACHE_TTL
+    }
+}
+
+#[derive(Default)]
+struct CommandResolutionCache {
+    availability: HashMap<String, TimedCommandValue<bool>>,
+    global_paths: HashMap<String, TimedCommandValue<Option<String>>>,
+}
+
+fn command_resolution_cache() -> &'static Mutex<CommandResolutionCache> {
+    static COMMAND_RESOLUTION_CACHE: OnceLock<Mutex<CommandResolutionCache>> = OnceLock::new();
+    COMMAND_RESOLUTION_CACHE.get_or_init(|| Mutex::new(CommandResolutionCache::default()))
+}
+
+pub(crate) fn clear_command_resolution_cache() {
+    *command_resolution_cache()
+        .lock()
+        .expect("command resolution cache poisoned") = CommandResolutionCache::default();
 }
 
 pub(crate) fn ensure_start_command_available(
     start_command: &str,
-    runtime_path: &str,
+    node_version: &str,
 ) -> Result<(), String> {
     let command_name = extract_command_name(start_command);
     if command_name.is_empty() {
@@ -127,13 +112,7 @@ pub(crate) fn ensure_start_command_available(
         return Ok(());
     }
 
-    let output = std::process::Command::new("where.exe")
-        .arg(&command_name)
-        .env("PATH", runtime_path)
-        .output()
-        .map_err(|error| format!("检查启动命令失败: {error}"))?;
-
-    if output.status.success() {
+    if is_command_available(&command_name, Some(node_version))? {
         return Ok(());
     }
 
@@ -145,9 +124,9 @@ pub(crate) fn ensure_start_command_available(
 
 pub(crate) fn ensure_package_manager_available(
     package_manager: ProjectPackageManager,
-    runtime_path: &str,
+    node_version: &str,
 ) -> Result<(), String> {
-    if is_package_manager_available(package_manager, Some(runtime_path)) {
+    if is_command_available(package_manager_command_name(package_manager), Some(node_version))? {
         return Ok(());
     }
 
@@ -157,39 +136,117 @@ pub(crate) fn ensure_package_manager_available(
     ))
 }
 
-pub(super) fn is_command_available(
-    command_name: &str,
-    runtime_path: Option<&str>,
-) -> Result<bool, String> {
-    let mut command = std::process::Command::new("where.exe");
-    command.arg(command_name);
+pub(super) fn create_context_command(
+    program: &str,
+    args: Vec<String>,
+    node_version: Option<&str>,
+    working_dir: Option<&Path>,
+) -> Result<Command, String> {
+    let (executable, invocation_args) = build_context_invocation(program, args, node_version)?;
+    let mut command = Command::new(executable);
+    command.args(invocation_args);
 
-    if let Some(path) = runtime_path {
-        command.env("PATH", path);
+    if let Some(working_dir) = working_dir {
+        command.current_dir(working_dir);
     }
 
-    command
+    #[cfg(target_os = "windows")]
+    command.creation_flags(CREATE_NO_WINDOW);
+
+    Ok(command)
+}
+
+pub(crate) fn create_async_context_command(
+    program: &str,
+    args: Vec<String>,
+    node_version: Option<&str>,
+    working_dir: Option<&Path>,
+) -> Result<TokioCommand, String> {
+    let (executable, invocation_args) = build_context_invocation(program, args, node_version)?;
+    let mut command = TokioCommand::new(executable);
+    command.args(invocation_args);
+
+    if let Some(working_dir) = working_dir {
+        command.current_dir(working_dir);
+    }
+
+    #[cfg(target_os = "windows")]
+    command.creation_flags(CREATE_NO_WINDOW);
+
+    Ok(command)
+}
+
+pub(super) fn is_command_available(
+    command_name: &str,
+    node_version: Option<&str>,
+) -> Result<bool, String> {
+    let cache_key = build_command_cache_key(command_name, node_version);
+    if let Some(result) = command_resolution_cache()
+        .lock()
+        .expect("command resolution cache poisoned")
+        .availability
+        .get(&cache_key)
+        .filter(|entry| entry.is_fresh())
+        .map(|entry| entry.value)
+    {
+        return Ok(result);
+    }
+
+    let output = create_context_command(
+        "where.exe",
+        vec![command_name.to_string()],
+        node_version,
+        None,
+    )?
         .output()
-        .map(|output| output.status.success())
-        .map_err(|error| format!("检查命令失败: {error}"))
+        .map_err(|error| format!("检查命令失败: {error}"))?;
+
+    let is_available =
+        output.status.success()
+            && String::from_utf8_lossy(&output.stdout)
+                .lines()
+                .any(|line| !line.trim().is_empty());
+
+    command_resolution_cache()
+        .lock()
+        .expect("command resolution cache poisoned")
+        .availability
+        .insert(cache_key, TimedCommandValue::new(is_available));
+
+    Ok(is_available)
 }
 
 pub(super) fn resolve_global_command_path(
     command_name: &str,
-    runtime_path: Option<&str>,
+    node_version: Option<&str>,
 ) -> Result<Option<String>, String> {
-    let mut command = std::process::Command::new("where.exe");
-    command.arg(command_name);
-
-    if let Some(path) = runtime_path {
-        command.env("PATH", path);
+    let cache_key = build_command_cache_key(command_name, node_version);
+    if let Some(result) = command_resolution_cache()
+        .lock()
+        .expect("command resolution cache poisoned")
+        .global_paths
+        .get(&cache_key)
+        .filter(|entry| entry.is_fresh())
+        .map(|entry| entry.value.clone())
+    {
+        return Ok(result);
     }
 
-    let output = command
+    let output = create_context_command(
+        "where.exe",
+        vec![command_name.to_string()],
+        node_version,
+        None,
+    )?
         .output()
         .map_err(|error| format!("查找命令失败: {error}"))?;
 
     if !output.status.success() {
+        command_resolution_cache()
+            .lock()
+            .expect("command resolution cache poisoned")
+            .global_paths
+            .insert(cache_key, TimedCommandValue::new(None));
         return Ok(None);
     }
 
@@ -214,7 +271,14 @@ pub(super) fn resolve_global_command_path(
         }
     });
 
-    Ok(matches.first().map(|path| (*path).to_string()))
+    let resolved_path = matches.first().map(|path| (*path).to_string());
+    command_resolution_cache()
+        .lock()
+        .expect("command resolution cache poisoned")
+        .global_paths
+        .insert(cache_key, TimedCommandValue::new(resolved_path.clone()));
+
+    Ok(resolved_path)
 }
 
 pub fn open_project_terminal(project_path: &str, node_version: &str) -> Result<(), String> {
@@ -223,25 +287,23 @@ pub fn open_project_terminal(project_path: &str, node_version: &str) -> Result<(
         return Err(format!("项目路径不存在: {}", resolved_path.display()));
     }
 
-    let node_directory = resolve_project_node_directory(node_version);
-    if !node_directory.join("node.exe").exists() {
-        return Err(format!(
-            "本机还没有安装 Node {}",
-            normalize_node_version(node_version)
-        ));
-    }
-
-    let mut command = Command::new("cmd.exe");
-    command.args([
-        "/d",
-        "/k",
-        &format!(
-            "cd /d \"{}\" && echo 已切换到 Node v{} && node -v",
-            resolved_path.display(),
-            normalize_node_version(node_version)
-        ),
-    ]);
-    command.env("PATH", build_project_runtime_path(node_version));
+    let script = format!(
+        "Write-Host \"已切换到 Node v{}\"\nnode -v\n",
+        normalize_node_version(node_version)
+    );
+    let mut command = create_context_command(
+        "powershell.exe",
+        vec![
+            "-NoLogo".to_string(),
+            "-NoExit".to_string(),
+            "-ExecutionPolicy".to_string(),
+            "Bypass".to_string(),
+            "-Command".to_string(),
+            script,
+        ],
+        Some(node_version),
+        Some(&resolved_path),
+    )?;
 
     #[cfg(target_os = "windows")]
     command.creation_flags(CREATE_NEW_CONSOLE);
@@ -279,4 +341,39 @@ fn extract_command_name(command: &str) -> String {
         .next()
         .unwrap_or_default()
         .to_string()
+}
+
+fn build_context_invocation(
+    program: &str,
+    args: Vec<String>,
+    node_version: Option<&str>,
+) -> Result<(PathBuf, Vec<String>), String> {
+    let Some(node_version) = node_version else {
+        return Ok((PathBuf::from(program), args));
+    };
+
+    let fnm_executable =
+        resolve_fnm_executable().ok_or_else(|| "未检测到 fnm，请先安装 fnm。".to_string())?;
+    let normalized_version = normalize_node_version(node_version);
+    let mut invocation_args = Vec::with_capacity(args.len() + 4);
+    invocation_args.push("exec".to_string());
+    invocation_args.push(format!("--using={normalized_version}"));
+    invocation_args.push("--log-level=error".to_string());
+    invocation_args.push(program.to_string());
+    invocation_args.extend(args);
+
+    Ok((fnm_executable, invocation_args))
+}
+
+fn build_command_cache_key(command_name: &str, node_version: Option<&str>) -> String {
+    let normalized_version = node_version
+        .map(normalize_node_version)
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| "system".to_string());
+
+    format!(
+        "{}::{}",
+        normalized_version,
+        command_name.trim().to_ascii_lowercase()
+    )
 }

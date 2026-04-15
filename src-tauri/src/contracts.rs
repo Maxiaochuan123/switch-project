@@ -17,7 +17,7 @@ pub enum BackendErrorCode {
     PackageManagerMissing,
     StartCommandMissing,
     StartupCommandFailed,
-    NvmMissing,
+    NodeManagerMissing,
     StoreReadFailed,
     StoreWriteFailed,
     ImportFailed,
@@ -125,14 +125,52 @@ pub struct ProjectRuntime {
     pub recent_logs: Vec<ProjectLogEntry>,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "lowercase")]
+pub enum NodeManagerKind {
+    Fnm,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(optional_fields)]
+pub struct NodeManagerInstallAttempt {
+    pub installer: String,
+    pub command: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exit_code: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stdout: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stderr: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(optional_fields)]
+pub struct NodeManagerInstallResult {
+    pub success: bool,
+    pub message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub installer: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+    #[serde(default)]
+    pub attempts: Vec<NodeManagerInstallAttempt>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct DesktopEnvironment {
     pub installed_node_versions: Vec<String>,
+    #[serde(default)]
+    pub nvm_installed_node_versions: Vec<String>,
     pub active_node_version: Option<String>,
     pub available_package_managers: Vec<ProjectPackageManager>,
     pub rimraf_installed: bool,
-    pub nvm_home: Option<String>,
+    pub node_manager: NodeManagerKind,
+    pub node_manager_available: bool,
+    pub node_manager_version: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, TS)]
@@ -376,6 +414,9 @@ fn build_typescript_contracts() -> String {
     push_typescript_declaration::<ProjectLogLevel>(&mut sections, &config);
     push_typescript_declaration::<ProjectLogEntry>(&mut sections, &config);
     push_typescript_declaration::<ProjectRuntime>(&mut sections, &config);
+    push_typescript_declaration::<NodeManagerKind>(&mut sections, &config);
+    push_typescript_declaration::<NodeManagerInstallAttempt>(&mut sections, &config);
+    push_typescript_declaration::<NodeManagerInstallResult>(&mut sections, &config);
     push_typescript_declaration::<DesktopEnvironment>(&mut sections, &config);
     push_typescript_declaration::<ProjectNodeVersionSource>(&mut sections, &config);
     push_typescript_declaration::<ProjectCommandSuggestion>(&mut sections, &config);

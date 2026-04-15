@@ -1,4 +1,5 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { getMissingNodeVersions } from "./project-draft";
 import { useActionLocks } from "./use-action-locks";
 import { useProjectAppActions } from "./use-project-app-actions";
 import { useProjectBootstrap } from "./use-project-bootstrap";
@@ -7,6 +8,7 @@ import { useProjectDialogState } from "./use-project-dialog-state";
 import { useProjectFeedback } from "./use-project-feedback";
 import { useProjectFormState } from "./use-project-form-state";
 import { useProjectManagementActions } from "./use-project-management-actions";
+import { useProjectNodeManagerActions } from "./use-project-node-manager-actions";
 import { useProjectRunActions } from "./use-project-run-actions";
 import { useProjectRuntimeState } from "./use-project-runtime-state";
 import { useProjectUtilityActions } from "./use-project-utility-actions";
@@ -31,24 +33,33 @@ export function useProjectPanelController() {
     deleteTarget,
     handleDeleteDialogOpenChange,
     handleLogsDialogOpenChange,
+    handleNodeManagerInstallLogsOpenChange,
     handleNodeInstallDialogOpenChange,
     handleNodeRetryDialogOpenChange,
     handleStartupSettingsOpenChange,
     isConfirmingAppClose,
+    isInstallingNodeManager,
+    isNodeManagerInstallLogsOpen,
     isInstallingNodeVersion,
     isMinimizingAppClose,
     isSavingStartupSettings,
     isStartupSettingsDialogOpen,
+    nodeInstallProgress,
     nodeInstallRequest,
+    nodeManagerInstallResult,
     nodeRetryTarget,
     openStartupSettingsDialog,
     setAppCloseRequest,
     setDeleteTarget,
     setIsConfirmingAppClose,
+    setIsInstallingNodeManager,
+    setIsNodeManagerInstallLogsOpen,
     setIsInstallingNodeVersion,
     setIsMinimizingAppClose,
     setIsSavingStartupSettings,
     setIsStartupSettingsDialogOpen,
+    setNodeInstallProgress,
+    setNodeManagerInstallResult,
     setNodeInstallRequest,
     setNodeRetryTarget,
     setStartupSettingsDraft,
@@ -117,6 +128,19 @@ export function useProjectPanelController() {
     syncRuntimes,
   });
 
+  const {
+    handleInstallNodeManager,
+    handleOpenNodeManagerGuide,
+    handleRefreshEnvironment,
+  } = useProjectNodeManagerActions({
+    loadProjectData,
+    runLockedAction,
+    setFeedback,
+    setIsInstallingNodeManager,
+    setIsNodeManagerInstallLogsOpen,
+    setNodeManagerInstallResult,
+  });
+
   const { handleDeleteProject, handleSaveProject, isSubmitting } =
     useProjectManagementActions({
       deleteTarget,
@@ -151,6 +175,7 @@ export function useProjectPanelController() {
     handleInstallNodeVersionAndStart,
     handleInstallNodeVersionOnly,
     handleRetryProjectWithSuggestedNode,
+    handleSyncNodeVersionsFromNvm,
     handleStartProject,
     handleStopProject,
   } = useProjectRunActions({
@@ -163,6 +188,7 @@ export function useProjectPanelController() {
     runLockedAction,
     setFeedback,
     setIsInstallingNodeVersion,
+    setNodeInstallProgress,
     setNodeInstallRequest,
     setNodeRetryTarget,
     clearProjectStartFailure,
@@ -170,6 +196,21 @@ export function useProjectPanelController() {
     showProjectOperationPanel,
     syncRuntimes,
   });
+
+  const [isNodeVersionSyncDismissed, setIsNodeVersionSyncDismissed] = useState(false);
+  const missingNvmNodeVersions = useMemo(
+    () =>
+      getMissingNodeVersions(
+        environment.installedNodeVersions,
+        environment.nvmInstalledNodeVersions
+      ),
+    [environment.installedNodeVersions, environment.nvmInstalledNodeVersions]
+  );
+  const missingNvmNodeVersionsKey = missingNvmNodeVersions.join("|");
+
+  useEffect(() => {
+    setIsNodeVersionSyncDismissed(false);
+  }, [missingNvmNodeVersionsKey]);
 
   const {
     handleConfirmAppClose,
@@ -305,6 +346,7 @@ export function useProjectPanelController() {
       draft: projectDraft,
       submitErrorMessage: formError,
       installedNodeVersions: environment.installedNodeVersions,
+      nvmInstalledNodeVersions: environment.nvmInstalledNodeVersions,
       activeNodeVersion: environment.activeNodeVersion,
       installedPackageManagers: environment.availablePackageManagers,
       isSubmitting,
@@ -313,6 +355,7 @@ export function useProjectPanelController() {
       dropzoneError,
       pathInspection,
       isInstallingNodeVersion,
+      nodeInstallProgress,
       onPackageManagerChange: handlePackageManagerChange,
       onInstallNodeVersion: handleInstallNodeVersionOnly,
       onBrowsePath: handleBrowseProjectPath,
@@ -325,6 +368,7 @@ export function useProjectPanelController() {
       environment.activeNodeVersion,
       environment.availablePackageManagers,
       environment.installedNodeVersions,
+      environment.nvmInstalledNodeVersions,
       formError,
       handleBrowseProjectPath,
       handleDropzonePath,
@@ -337,6 +381,7 @@ export function useProjectPanelController() {
       isInstallingNodeVersion,
       isProjectDialogOpen,
       isSubmitting,
+      nodeInstallProgress,
       pathInspection,
       projectDraft,
     ]
@@ -348,6 +393,7 @@ export function useProjectPanelController() {
       projectName: nodeInstallRequest?.project.name ?? "",
       nodeVersion: nodeInstallRequest?.version ?? "",
       isInstalling: isInstallingNodeVersion,
+      progress: nodeInstallProgress,
       onConfirm: handleInstallNodeVersionAndStart,
       onOpenChange: handleNodeInstallDialogOpenChange,
     }),
@@ -355,7 +401,37 @@ export function useProjectPanelController() {
       handleInstallNodeVersionAndStart,
       handleNodeInstallDialogOpenChange,
       isInstallingNodeVersion,
+      nodeInstallProgress,
       nodeInstallRequest,
+    ]
+  );
+
+  const nodeVersionSyncCard = useMemo(
+    () => ({
+      open:
+        !isLoading &&
+        environment.nodeManagerAvailable &&
+        missingNvmNodeVersions.length > 0 &&
+        !isNodeVersionSyncDismissed,
+      missingVersions: missingNvmNodeVersions,
+      isSyncing: isInstallingNodeVersion && nodeInstallProgress?.kind === "sync",
+      progress:
+        nodeInstallProgress?.kind === "sync" ? nodeInstallProgress : null,
+      onDismiss: () => setIsNodeVersionSyncDismissed(true),
+      onSync: () =>
+        runLockedAction("sync-node-versions-from-nvm", async () => {
+          await handleSyncNodeVersionsFromNvm(missingNvmNodeVersions);
+        }),
+    }),
+    [
+      environment.nodeManagerAvailable,
+      handleSyncNodeVersionsFromNvm,
+      isInstallingNodeVersion,
+      isLoading,
+      isNodeVersionSyncDismissed,
+      missingNvmNodeVersions,
+      nodeInstallProgress,
+      runLockedAction,
     ]
   );
 
@@ -395,6 +471,32 @@ export function useProjectPanelController() {
       isStartupSettingsDialogOpen,
       setStartupSettingsDraft,
       startupSettingsDraft,
+    ]
+  );
+
+  const fnmSetupDialog = useMemo(
+    () => ({
+      open: !isLoading && !environment.nodeManagerAvailable,
+      isInstalling: isInstallingNodeManager,
+      installResult: nodeManagerInstallResult,
+      isLogsOpen: isNodeManagerInstallLogsOpen,
+      onInstall: handleInstallNodeManager,
+      onLogsOpenChange: handleNodeManagerInstallLogsOpenChange,
+      onOpenGuide: handleOpenNodeManagerGuide,
+      onOpenLogs: () => setIsNodeManagerInstallLogsOpen(true),
+      onRefresh: handleRefreshEnvironment,
+    }),
+    [
+      environment.nodeManagerAvailable,
+      handleInstallNodeManager,
+      handleNodeManagerInstallLogsOpenChange,
+      handleOpenNodeManagerGuide,
+      handleRefreshEnvironment,
+      isInstallingNodeManager,
+      isNodeManagerInstallLogsOpen,
+      isLoading,
+      nodeManagerInstallResult,
+      setIsNodeManagerInstallLogsOpen,
     ]
   );
 
@@ -444,6 +546,8 @@ export function useProjectPanelController() {
 
   return {
     page,
+    nodeVersionSyncCard,
+    fnmSetupDialog,
     projectFormDialog,
     nodeInstallDialog,
     nodeRetryDialog,

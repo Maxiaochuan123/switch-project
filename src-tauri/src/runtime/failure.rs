@@ -1,5 +1,5 @@
 use crate::contracts::{normalize_node_version, BackendErrorCode, ProjectRuntime};
-use crate::node_versions::list_installed_node_versions;
+use crate::node_manager::list_installed_node_versions;
 
 pub fn select_retry_node_version(selected_node_version: &str) -> Option<String> {
     let selected_major = normalize_node_version(selected_node_version)
@@ -54,6 +54,14 @@ pub fn classify_runtime_failure(
         || normalized.contains("node_modules")
     {
         return (Some(BackendErrorCode::MissingDependencies), None);
+    }
+
+    if normalized.contains("fnm")
+        && (normalized.contains("未检测到")
+            || normalized.contains("not recognized")
+            || normalized.contains("无法自动安装"))
+    {
+        return (Some(BackendErrorCode::NodeManagerMissing), None);
     }
 
     if normalized.contains("package manager")

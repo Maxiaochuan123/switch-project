@@ -2,6 +2,7 @@ import { useCallback, useState } from "react";
 import type {
   AppCloseRequest,
   AppStartupSettings,
+  NodeManagerInstallResult,
   ProjectConfig,
 } from "@/shared/contracts";
 
@@ -13,6 +14,13 @@ export type NodeInstallRequest = {
 export type NodeRetryRequest = {
   project: ProjectConfig;
   suggestedNodeVersion: string;
+};
+
+export type NodeInstallProgress = {
+  kind: "single" | "sync";
+  currentVersion: string;
+  completedCount: number;
+  totalCount: number;
 };
 
 type UseProjectDialogStateOptions = {
@@ -27,8 +35,14 @@ export function useProjectDialogState({ startupSettings }: UseProjectDialogState
   const [terminalTarget, setTerminalTarget] = useState<ProjectConfig | null>(null);
   const [nodeInstallRequest, setNodeInstallRequest] = useState<NodeInstallRequest | null>(null);
   const [nodeRetryTarget, setNodeRetryTarget] = useState<NodeRetryRequest | null>(null);
+  const [nodeInstallProgress, setNodeInstallProgress] =
+    useState<NodeInstallProgress | null>(null);
   const [appCloseRequest, setAppCloseRequest] = useState<AppCloseRequest | null>(null);
+  const [nodeManagerInstallResult, setNodeManagerInstallResult] =
+    useState<NodeManagerInstallResult | null>(null);
   const [isSavingStartupSettings, setIsSavingStartupSettings] = useState(false);
+  const [isInstallingNodeManager, setIsInstallingNodeManager] = useState(false);
+  const [isNodeManagerInstallLogsOpen, setIsNodeManagerInstallLogsOpen] = useState(false);
   const [isInstallingNodeVersion, setIsInstallingNodeVersion] = useState(false);
   const [isConfirmingAppClose, setIsConfirmingAppClose] = useState(false);
   const [isMinimizingAppClose, setIsMinimizingAppClose] = useState(false);
@@ -67,6 +81,10 @@ export function useProjectDialogState({ startupSettings }: UseProjectDialogState
     }
   }, []);
 
+  const handleNodeManagerInstallLogsOpenChange = useCallback((nextOpen: boolean) => {
+    setIsNodeManagerInstallLogsOpen(nextOpen);
+  }, []);
+
   const openStartupSettingsDialog = useCallback(() => {
     setStartupSettingsDraft(startupSettings);
     setIsStartupSettingsDialogOpen(true);
@@ -77,24 +95,33 @@ export function useProjectDialogState({ startupSettings }: UseProjectDialogState
     deleteTarget,
     handleDeleteDialogOpenChange,
     handleLogsDialogOpenChange,
+    handleNodeManagerInstallLogsOpenChange,
     handleNodeInstallDialogOpenChange,
     handleNodeRetryDialogOpenChange,
     handleStartupSettingsOpenChange,
     isConfirmingAppClose,
+    isInstallingNodeManager,
+    isNodeManagerInstallLogsOpen,
     isInstallingNodeVersion,
     isMinimizingAppClose,
     isSavingStartupSettings,
     isStartupSettingsDialogOpen,
+    nodeInstallProgress,
     nodeInstallRequest,
+    nodeManagerInstallResult,
     nodeRetryTarget,
     openStartupSettingsDialog,
     setAppCloseRequest,
     setDeleteTarget,
     setIsConfirmingAppClose,
+    setIsInstallingNodeManager,
+    setIsNodeManagerInstallLogsOpen,
     setIsInstallingNodeVersion,
     setIsMinimizingAppClose,
     setIsSavingStartupSettings,
     setIsStartupSettingsDialogOpen,
+    setNodeInstallProgress,
+    setNodeManagerInstallResult,
     setNodeInstallRequest,
     setNodeRetryTarget,
     setStartupSettingsDraft,

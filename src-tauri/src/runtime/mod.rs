@@ -20,7 +20,10 @@ use crate::contracts::{ProjectLogLevel, ProjectRuntime, ProjectStatus};
 
 use self::{
     address::{now_iso, strip_ansi},
-    entry::{collect_addresses, push_logs, update_preview},
+    entry::{
+        collect_addresses, push_logs, push_startup_timing_summary, update_preview,
+        StartupTimingSummaryKind,
+    },
 };
 
 pub use self::{
@@ -32,11 +35,23 @@ pub use self::{
 };
 
 pub(crate) use self::environment::{
-    build_project_runtime_path, ensure_package_manager_available, ensure_start_command_available,
+    clear_command_resolution_cache, create_async_context_command, ensure_package_manager_available,
+    ensure_start_command_available,
 };
 
 pub(super) const CREATE_NO_WINDOW: u32 = 0x08000000;
 pub(super) const CREATE_NEW_CONSOLE: u32 = 0x00000010;
+
+#[derive(Clone, Default)]
+pub(super) struct RuntimeStartupTimeline {
+    environment_ready_at_ms: Option<i64>,
+    dependency_install_started_at_ms: Option<i64>,
+    dependency_install_finished_at_ms: Option<i64>,
+    process_spawned_at_ms: Option<i64>,
+    ready_at_ms: Option<i64>,
+    dependency_install_required: bool,
+    summary_logged: bool,
+}
 
 pub struct RuntimeManager {
     entries: Mutex<HashMap<String, RuntimeEntry>>,
@@ -53,6 +68,7 @@ pub(super) struct RuntimeEntry {
     log_sequence: u64,
     start_timestamp_ms: i64,
     selected_node_version: String,
+    startup_timeline: RuntimeStartupTimeline,
     runtime: ProjectRuntime,
 }
 
@@ -125,9 +141,12 @@ impl RuntimeManager {
             }
 
             if added_local && entry.runtime.last_success_at.is_none() {
+                let completed_at_ms = Utc::now().timestamp_millis();
+                entry.startup_timeline.ready_at_ms = Some(completed_at_ms);
                 entry.runtime.last_success_at = Some(now_iso());
                 entry.runtime.startup_duration_ms =
-                    Some((Utc::now().timestamp_millis() - entry.start_timestamp_ms).max(0) as u64);
+                    Some((completed_at_ms - entry.start_timestamp_ms).max(0) as u64);
+                push_startup_timing_summary(entry, completed_at_ms, StartupTimingSummaryKind::Ready);
             }
 
             entry.runtime.failure_message = None;

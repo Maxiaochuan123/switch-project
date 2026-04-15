@@ -11,19 +11,21 @@ This repository uses:
 
 The baseline is declared in:
 
+- `.node-version`
 - `.nvmrc`
 - `package.json > engines`
 
-Recommended setup on Windows with `nvm-windows`:
+Recommended setup on Windows with `fnm`:
 
 ```powershell
-nvm install 24.14.1
-nvm use 24.14.1
+winget install Schniz.fnm
+fnm install 24.14.1
+fnm use 24.14.1
 npm install
 npm run dev
 ```
 
-If the terminal still reports the wrong Node version after `nvm use`, open a new terminal and retry.
+If the terminal still reports the wrong Node version after `fnm use`, open a new terminal and retry.
 
 ## Version Model
 
@@ -40,7 +42,7 @@ Example:
 - Project A can run on `20.20.2`
 - Project B can run on `18.20.7`
 
-As long as those versions are installed locally with `nvm-windows`, the panel can launch each project with its configured runtime.
+As long as those versions are installed locally with `fnm`, the panel can launch each project with its configured runtime.
 
 ## Commands
 
@@ -62,4 +64,6 @@ npm run build
 - `npm run web:dev` starts only the frontend dev server on `http://localhost:1420`.
 - `npm run contracts:generate` regenerates `src/shared/contracts.generated.ts` from the Rust contracts in `src-tauri/src/contracts.rs`.
 - `npm run build` may fail if local Tauri bundling dependencies or signing tools are missing.
-- The panel injects the configured Node version into launched project processes instead of relying on a manual global `nvm use` before every start.
+- The panel checks `fnm` on startup and can guide first-run installation when it is missing.
+- The panel launches project processes inside the selected `fnm` Node context instead of relying on a manual global switch.
+- Managed projects still support common version files such as `.node-version`, `.nvmrc`, and `package.json > engines.node`.

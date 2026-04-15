@@ -5,13 +5,19 @@ import semver from "semver";
 
 const rootDir = path.resolve(import.meta.dirname, "..");
 const packageJsonPath = path.join(rootDir, "package.json");
+const nodeVersionPath = path.join(rootDir, ".node-version");
 const nvmrcPath = path.join(rootDir, ".nvmrc");
 
 const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, "utf8"));
 const requiredNodeRange = packageJson.engines?.node;
 const currentNodeVersion = process.versions.node;
-const recommendedVersion = fs.existsSync(nvmrcPath)
-  ? fs.readFileSync(nvmrcPath, "utf8").trim()
+const recommendedVersionFilePath = fs.existsSync(nodeVersionPath)
+  ? nodeVersionPath
+  : fs.existsSync(nvmrcPath)
+    ? nvmrcPath
+    : null;
+const recommendedVersion = recommendedVersionFilePath
+  ? fs.readFileSync(recommendedVersionFilePath, "utf8").trim()
   : null;
 
 if (!requiredNodeRange) {
@@ -32,11 +38,11 @@ if (recommendedVersion) {
   lines.push(`建议先切换到: ${recommendedVersion}`);
   lines.push("");
   lines.push("可执行命令:");
-  lines.push(`  nvm use ${recommendedVersion}`);
+  lines.push(`  fnm use ${recommendedVersion}`);
 }
 
 lines.push("");
-lines.push("如果你刚执行过 nvm use，但版本仍然不对，请关闭当前终端并重新打开后再试。");
+lines.push("如果你刚安装过 fnm 或切换过版本，建议重新打开终端后再试。");
 lines.push("");
 
 console.error(lines.join("\n"));

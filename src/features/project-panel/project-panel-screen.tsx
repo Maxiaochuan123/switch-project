@@ -2,6 +2,7 @@ import { lazy, Suspense } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Download,Plus, Settings2, Upload } from "lucide-react";
 import { DropzoneField } from "@/components/dropzone-field";
+import { NodeVersionSyncCard } from "@/components/node-version-sync-card";
 import { ProjectCard } from "@/components/project-card";
 import { ProjectGlobalDropzone } from "@/components/project-global-dropzone";
 import { Button } from "@/components/ui/button";
@@ -18,6 +19,12 @@ const ProjectFormDialog = lazy(() =>
 const InstallNodeVersionDialog = lazy(() =>
   import("@/components/install-node-version-dialog").then((module) => ({
     default: module.InstallNodeVersionDialog,
+  }))
+);
+
+const FnmSetupDialog = lazy(() =>
+  import("@/components/fnm-setup-dialog").then((module) => ({
+    default: module.FnmSetupDialog,
   }))
 );
 
@@ -115,6 +122,16 @@ export function ProjectPanelScreen() {
             </div>
           </header>
 
+          {controller.nodeVersionSyncCard.open ? (
+            <NodeVersionSyncCard
+              missingVersions={controller.nodeVersionSyncCard.missingVersions}
+              isSyncing={controller.nodeVersionSyncCard.isSyncing}
+              progress={controller.nodeVersionSyncCard.progress}
+              onDismiss={controller.nodeVersionSyncCard.onDismiss}
+              onSync={() => void controller.nodeVersionSyncCard.onSync()}
+            />
+          ) : null}
+
           <section className="mt-3 flex-1 rounded-xl border border-border/50 bg-black/40 p-2.5 shadow-2xl shadow-black/20 backdrop-blur-xl">
             <AnimatePresence mode="wait">
               {!controller.page.isLoading && !controller.page.hasProjects ? (
@@ -199,12 +216,27 @@ export function ProjectPanelScreen() {
       </div>
 
       <Suspense fallback={null}>
+        {controller.fnmSetupDialog.open ? (
+          <FnmSetupDialog
+            open={controller.fnmSetupDialog.open}
+            isInstalling={controller.fnmSetupDialog.isInstalling}
+            installResult={controller.fnmSetupDialog.installResult}
+            isLogsOpen={controller.fnmSetupDialog.isLogsOpen}
+            onInstall={() => void controller.fnmSetupDialog.onInstall()}
+            onLogsOpenChange={controller.fnmSetupDialog.onLogsOpenChange}
+            onOpenGuide={() => void controller.fnmSetupDialog.onOpenGuide()}
+            onOpenLogs={controller.fnmSetupDialog.onOpenLogs}
+            onRefresh={() => void controller.fnmSetupDialog.onRefresh()}
+          />
+        ) : null}
+
         {controller.projectFormDialog.open ? (
           <ProjectFormDialog
             open={controller.projectFormDialog.open}
             draft={controller.projectFormDialog.draft}
             submitErrorMessage={controller.projectFormDialog.submitErrorMessage}
             installedNodeVersions={controller.projectFormDialog.installedNodeVersions}
+            nvmInstalledNodeVersions={controller.projectFormDialog.nvmInstalledNodeVersions}
             activeNodeVersion={controller.projectFormDialog.activeNodeVersion}
             installedPackageManagers={controller.projectFormDialog.installedPackageManagers}
             isSubmitting={controller.projectFormDialog.isSubmitting}
@@ -213,6 +245,7 @@ export function ProjectPanelScreen() {
             dropzoneError={controller.projectFormDialog.dropzoneError}
             pathInspection={controller.projectFormDialog.pathInspection}
             isInstallingNodeVersion={controller.projectFormDialog.isInstallingNodeVersion}
+            nodeInstallProgress={controller.projectFormDialog.nodeInstallProgress}
             onPackageManagerChange={controller.projectFormDialog.onPackageManagerChange}
             onInstallNodeVersion={(version) =>
               void controller.projectFormDialog.onInstallNodeVersion(version)
@@ -229,6 +262,7 @@ export function ProjectPanelScreen() {
             projectName={controller.nodeInstallDialog.projectName}
             nodeVersion={controller.nodeInstallDialog.nodeVersion}
             isInstalling={controller.nodeInstallDialog.isInstalling}
+            progress={controller.nodeInstallDialog.progress}
             onConfirm={() => void controller.nodeInstallDialog.onConfirm()}
             onOpenChange={controller.nodeInstallDialog.onOpenChange}
           />

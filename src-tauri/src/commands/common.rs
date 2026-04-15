@@ -1,28 +1,111 @@
+use std::time::{Duration, Instant};
+
 use semver::{Version, VersionReq};
 use tauri::State;
 
 use crate::{
     contracts::{
         normalize_node_version, AppStartupSettings, BackendErrorCode, DesktopEnvironment,
-        ProjectConfig, ProjectDiagnosis, ProjectPanelSnapshot, ProjectReadiness,
+        NodeManagerKind, ProjectConfig, ProjectDiagnosis, ProjectPanelSnapshot, ProjectReadiness,
         ProjectStartPreflight,
     },
     lock_error,
-    node_versions::{
-        list_installed_node_versions, resolve_active_node_version, resolve_nvm_home,
+    node_manager::{
+        is_node_manager_available, list_installed_node_versions, list_nvm_installed_node_versions,
+        resolve_active_node_version, resolve_node_manager_version,
     },
     package_managers::list_available_package_managers,
     project_directory::inspect_project_directory as inspect_project_directory_impl,
     runtime::{
-        build_project_runtime_path, ensure_package_manager_available,
-        ensure_start_command_available, is_delete_tool_ready,
+        ensure_package_manager_available, ensure_start_command_available, is_delete_tool_ready,
     },
     ManagedState,
 };
 
+#[derive(Clone)]
 pub struct ProjectStartAssessment {
     pub inspection: crate::contracts::ProjectDirectoryInspection,
     pub preflight: ProjectStartPreflight,
+}
+
+const PROJECT_START_ASSESSMENT_TTL: Duration = Duration::from_secs(5);
+
+#[derive(Clone)]
+pub(crate) struct CachedProjectStartAssessment {
+    project: ProjectConfig,
+    assessment: ProjectStartAssessment,
+    cached_at: Instant,
+}
+
+impl CachedProjectStartAssessment {
+    fn new(project: ProjectConfig, assessment: ProjectStartAssessment) -> Self {
+        Self {
+            project,
+            assessment,
+            cached_at: Instant::now(),
+        }
+    }
+
+    fn is_valid_for(&self, project: &ProjectConfig) -> bool {
+        self.cached_at.elapsed() <= PROJECT_START_ASSESSMENT_TTL
+            && project_configs_match(&self.project, project)
+    }
+}
+
+fn project_configs_match(left: &ProjectConfig, right: &ProjectConfig) -> bool {
+    left.id == right.id
+        && left.name == right.name
+        && left.path == right.path
+        && left.node_version == right.node_version
+        && left.package_manager == right.package_manager
+        && left.start_command == right.start_command
+        && left.auto_start_on_app_launch == right.auto_start_on_app_launch
+        && left.auto_open_local_url_on_start == right.auto_open_local_url_on_start
+}
+
+pub fn cache_project_start_assessment(
+    state: &State<ManagedState>,
+    project: &ProjectConfig,
+    assessment: &ProjectStartAssessment,
+) -> Result<(), String> {
+    state
+        .project_start_assessments
+        .lock()
+        .map_err(lock_error)?
+        .insert(
+            project.id.clone(),
+            CachedProjectStartAssessment::new(project.clone(), assessment.clone()),
+        );
+
+    Ok(())
+}
+
+pub fn get_cached_project_start_assessment(
+    state: &State<ManagedState>,
+    project: &ProjectConfig,
+) -> Option<ProjectStartAssessment> {
+    let mut cache = state.project_start_assessments.lock().ok()?;
+    let cached = cache.get(&project.id)?;
+
+    if !cached.is_valid_for(project) {
+        cache.remove(&project.id);
+        return None;
+    }
+
+    Some(cached.assessment.clone())
+}
+
+pub fn clear_project_start_assessment_cache(
+    state: &State<ManagedState>,
+    project_id: &str,
+) -> Result<(), String> {
+    state
+        .project_start_assessments
+        .lock()
+        .map_err(lock_error)?
+        .remove(project_id);
+
+    Ok(())
 }
 
 pub fn get_project(state: &State<ManagedState>, project_id: &str) -> Result<ProjectConfig, String> {
@@ -228,6 +311,17 @@ pub fn assess_project_start(project: &ProjectConfig) -> ProjectStartAssessment {
             Some(BackendErrorCode::StartCommandMissing),
             Some("请先配置启动命令后再启动项目。".to_string()),
         )
+    } else if !is_node_manager_available() {
+        build_start_preflight_result(
+            false,
+            missing_dependencies,
+            selected_node_version,
+            has_declared_node_requirement,
+            None,
+            None,
+            Some(BackendErrorCode::NodeManagerMissing),
+            Some("未检测到 fnm，请先完成 fnm 初始化。".to_string()),
+        )
     } else if selected_node_version.trim().is_empty() {
         let install_node_version = declared_node_requirement.clone().or_else(|| {
             inspection
@@ -363,9 +457,7 @@ fn build_start_preflight_after_node_check(
         );
     }
 
-    let runtime_path = build_project_runtime_path(&selected_node_version);
-
-    if let Err(error) = ensure_package_manager_available(project.package_manager, &runtime_path) {
+    if let Err(error) = ensure_package_manager_available(project.package_manager, &selected_node_version) {
         return build_start_preflight_result(
             false,
             missing_dependencies,
@@ -378,7 +470,7 @@ fn build_start_preflight_after_node_check(
         );
     }
 
-    if let Err(error) = ensure_start_command_available(&project.start_command, &runtime_path) {
+    if let Err(error) = ensure_start_command_available(&project.start_command, &selected_node_version) {
         return build_start_preflight_result(
             false,
             missing_dependencies,
@@ -415,8 +507,8 @@ fn resolve_package_manager_availability(
         && node_installed
         && !selected_node_version.trim().is_empty()
     {
-        let runtime_path = build_project_runtime_path(selected_node_version);
-        return ensure_package_manager_available(project.package_manager, &runtime_path).is_ok();
+        return ensure_package_manager_available(project.package_manager, selected_node_version)
+            .is_ok();
     }
 
     list_available_package_managers().contains(&project.package_manager)
@@ -439,10 +531,13 @@ fn build_diagnosis_warnings(preflight: &ProjectStartPreflight) -> Vec<String> {
 pub fn build_desktop_environment() -> Result<DesktopEnvironment, String> {
     Ok(DesktopEnvironment {
         installed_node_versions: list_installed_node_versions(),
+        nvm_installed_node_versions: list_nvm_installed_node_versions(),
         active_node_version: resolve_active_node_version(),
         available_package_managers: list_available_package_managers(),
         rimraf_installed: is_delete_tool_ready()?,
-        nvm_home: resolve_nvm_home().map(|value| value.to_string_lossy().to_string()),
+        node_manager: NodeManagerKind::Fnm,
+        node_manager_available: is_node_manager_available(),
+        node_manager_version: resolve_node_manager_version(),
     })
 }
 
@@ -464,12 +559,19 @@ mod tests {
     use std::{
         fs,
         path::{Path, PathBuf},
+        time::{Duration, Instant},
         time::{SystemTime, UNIX_EPOCH},
     };
 
-    use crate::contracts::{BackendErrorCode, ProjectConfig, ProjectPackageManager};
+    use crate::contracts::{
+        BackendErrorCode, ProjectConfig, ProjectDirectoryInspection, ProjectPackageManager,
+        ProjectReadiness, ProjectStartPreflight,
+    };
 
-    use super::{assess_project_start, build_project_diagnosis};
+    use super::{
+        assess_project_start, build_project_diagnosis, CachedProjectStartAssessment,
+        ProjectStartAssessment, PROJECT_START_ASSESSMENT_TTL,
+    };
 
     #[test]
     fn diagnosis_allows_custom_saved_start_command() {
@@ -523,6 +625,10 @@ mod tests {
 
     #[test]
     fn diagnosis_blocks_start_when_selected_node_is_not_installed() {
+        if !crate::node_manager::is_node_manager_available() {
+            return;
+        }
+
         let temp_dir = create_temp_project_dir("missing-selected-node");
         write_package_json(
             &temp_dir,
@@ -543,8 +649,37 @@ mod tests {
         assert!(!diagnosis.readiness.can_start);
     }
 
+    #[test]
+    fn cached_project_start_assessment_rejects_changed_project_config() {
+        let project = build_project(Path::new("C:\\workspace\\demo"), "24.14.1", "npm run dev");
+        let cached = CachedProjectStartAssessment::new(project.clone(), build_assessment(true));
+        let changed_project = ProjectConfig {
+            start_command: "pnpm dev".to_string(),
+            ..project
+        };
+
+        assert!(!cached.is_valid_for(&changed_project));
+    }
+
+    #[test]
+    fn cached_project_start_assessment_expires_after_ttl() {
+        let project = build_project(Path::new("C:\\workspace\\demo"), "24.14.1", "npm run dev");
+        let mut cached = CachedProjectStartAssessment::new(project.clone(), build_assessment(true));
+        cached.cached_at = Instant::now() - PROJECT_START_ASSESSMENT_TTL - Duration::from_millis(1);
+
+        assert!(!cached.is_valid_for(&project));
+    }
+
+    #[test]
+    fn cached_project_start_assessment_accepts_matching_fresh_project() {
+        let project = build_project(Path::new("C:\\workspace\\demo"), "24.14.1", "npm run dev");
+        let cached = CachedProjectStartAssessment::new(project.clone(), build_assessment(true));
+
+        assert!(cached.is_valid_for(&project));
+    }
+
     fn installed_node_version() -> Option<String> {
-        crate::node_versions::list_installed_node_versions()
+        crate::node_manager::list_installed_node_versions()
             .into_iter()
             .next()
     }
@@ -559,6 +694,41 @@ mod tests {
             start_command: start_command.to_string(),
             auto_start_on_app_launch: false,
             auto_open_local_url_on_start: false,
+        }
+    }
+
+    fn build_assessment(can_start: bool) -> ProjectStartAssessment {
+        ProjectStartAssessment {
+            inspection: ProjectDirectoryInspection {
+                exists: true,
+                is_directory: true,
+                has_package_json: true,
+                has_node_modules: true,
+                suggested_name: Some("Test Project".to_string()),
+                recommended_node_version: Some("24.14.1".to_string()),
+                node_version_hint: Some("24.14.1".to_string()),
+                node_version_source: None,
+                package_manager: Some(ProjectPackageManager::Npm),
+                recommended_start_command: Some("npm run dev".to_string()),
+                available_start_commands: Vec::new(),
+                readiness: ProjectReadiness {
+                    node_installed: true,
+                    package_manager_available: true,
+                    has_node_modules: true,
+                    can_start,
+                    warnings: Vec::new(),
+                },
+            },
+            preflight: ProjectStartPreflight {
+                can_start,
+                missing_dependencies: false,
+                selected_node_version: "24.14.1".to_string(),
+                has_declared_node_requirement: true,
+                suggested_node_version: None,
+                install_node_version: None,
+                reason_code: None,
+                reason_message: None,
+            },
         }
     }
 

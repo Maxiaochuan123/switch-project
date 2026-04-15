@@ -13,7 +13,8 @@ use crate::{
 };
 
 use super::common::{
-    assess_project_start, build_project_diagnosis, build_project_panel_snapshot, get_project,
+    assess_project_start, build_project_diagnosis, build_project_panel_snapshot,
+    cache_project_start_assessment, clear_project_start_assessment_cache, get_project,
 };
 
 #[tauri::command]
@@ -36,7 +37,9 @@ pub fn get_project_panel_snapshot(
 
 #[tauri::command]
 pub fn save_project(state: State<ManagedState>, project: ProjectConfig) -> Result<(), String> {
-    state.store.lock().map_err(lock_error)?.save_project(project)
+    let project_id = project.id.clone();
+    state.store.lock().map_err(lock_error)?.save_project(project)?;
+    clear_project_start_assessment_cache(&state, &project_id)
 }
 
 #[tauri::command]
@@ -46,7 +49,8 @@ pub fn delete_project(
     project_id: String,
 ) -> Result<(), String> {
     state.runtime_manager.stop_project(&app, &project_id)?;
-    state.store.lock().map_err(lock_error)?.delete_project(&project_id)
+    state.store.lock().map_err(lock_error)?.delete_project(&project_id)?;
+    clear_project_start_assessment_cache(&state, &project_id)
 }
 
 #[tauri::command]
@@ -79,14 +83,16 @@ pub fn preflight_project_start(
     project_id: String,
 ) -> Result<ProjectStartPreflight, String> {
     let project = get_project(&state, &project_id)?;
-    Ok(assess_project_start(&project).preflight)
+    let assessment = assess_project_start(&project);
+    cache_project_start_assessment(&state, &project, &assessment)?;
+    Ok(assessment.preflight)
 }
 
 #[tauri::command]
 pub fn inspect_project_directory(project_path: String) -> Result<ProjectDirectoryInspection, String> {
     Ok(inspect_project_directory_impl(
         &project_path,
-        &crate::node_versions::list_installed_node_versions(),
+        &crate::node_manager::list_installed_node_versions(),
     ))
 }
 

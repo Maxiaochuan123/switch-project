@@ -2,24 +2,22 @@ use std::{path::PathBuf, process::Stdio};
 
 use chrono::Utc;
 use tauri::{AppHandle, Manager};
-use tokio::process::Command;
 use tokio::time::{sleep, Duration};
 
+use crate::commands::common::{assess_project_start, ProjectStartAssessment};
 use crate::contracts::{
-    normalize_node_version, ProjectConfig, ProjectLogEntry, ProjectLogLevel, ProjectRuntime,
-    ProjectStatus,
+    normalize_node_version, ProjectConfig, ProjectLogLevel, ProjectRuntime, ProjectStatus,
 };
 
 use super::{
     address::now_iso,
-    build_project_runtime_path, ensure_package_manager_available, ensure_start_command_available,
+    create_async_context_command,
     dependencies::install_project_dependencies_if_missing_with_logs,
-    entry::push_logs,
-    environment::resolve_project_node_directory,
+    entry::{push_logs, push_startup_timing_summary, StartupTimingSummaryKind},
     events::emit_runtime_update,
     failure::classify_runtime_failure,
     process::{read_stream, wait_for_exit},
-    RuntimeEntry, RuntimeManager, CREATE_NO_WINDOW,
+    RuntimeEntry, RuntimeManager, RuntimeStartupTimeline,
 };
 
 impl RuntimeManager {
@@ -27,6 +25,7 @@ impl RuntimeManager {
         &self,
         app: &AppHandle,
         project: ProjectConfig,
+        preflight_assessment: Option<ProjectStartAssessment>,
     ) -> Result<(), String> {
         if self.has_dependency_operation(&project.id) {
             return Err("当前项目正在处理依赖，请稍后再启动。".to_string());
@@ -44,6 +43,8 @@ impl RuntimeManager {
         let project_path = PathBuf::from(project.path.trim());
         let start_timestamp_ms = Utc::now().timestamp_millis();
         let started_at = now_iso();
+        let start_assessment = preflight_assessment.unwrap_or_else(|| assess_project_start(&project));
+        let selected_node_version = normalize_node_version(&start_assessment.preflight.selected_node_version);
 
         if !project_path.exists() || !project_path.is_dir() {
             let message = format!("项目路径不存在: {}", project_path.display());
@@ -58,16 +59,16 @@ impl RuntimeManager {
             return Err(message);
         }
 
-        let node_directory = resolve_project_node_directory(&project.node_version);
-        if !node_directory.join("node.exe").exists() {
-            let message = format!(
-                "本机还没有通过 nvm-windows 安装 Node {}",
-                normalize_node_version(&project.node_version)
-            );
+        if !start_assessment.preflight.can_start {
+            let message = start_assessment
+                .preflight
+                .reason_message
+                .clone()
+                .unwrap_or_else(|| "启动前检查未通过。".to_string());
             self.emit_start_error(
                 app,
                 &project.id,
-                &project.node_version,
+                &selected_node_version,
                 started_at,
                 start_timestamp_ms,
                 message.clone(),
@@ -75,17 +76,17 @@ impl RuntimeManager {
             return Err(message);
         }
 
-        let runtime_path = build_project_runtime_path(&project.node_version);
-        ensure_package_manager_available(project.package_manager, &runtime_path)?;
-        ensure_start_command_available(&project.start_command, &runtime_path)?;
-
         let mut starting_entry = RuntimeEntry {
             pid: 0,
             expected_stop: false,
             preview_priority: 0,
             log_sequence: 0,
             start_timestamp_ms,
-            selected_node_version: normalize_node_version(&project.node_version),
+            selected_node_version: selected_node_version.clone(),
+            startup_timeline: RuntimeStartupTimeline {
+                environment_ready_at_ms: Some(Utc::now().timestamp_millis()),
+                ..RuntimeStartupTimeline::default()
+            },
             runtime: ProjectRuntime {
                 project_id: project.id.clone(),
                 status: ProjectStatus::Starting,
@@ -111,7 +112,7 @@ impl RuntimeManager {
                 "环境校验完成。".to_string(),
                 format!(
                     "正在使用 Node v{} 启动项目。",
-                    normalize_node_version(&project.node_version)
+                    selected_node_version
                 ),
                 format!("启动命令: {}", project.start_command),
             ],
@@ -131,6 +132,15 @@ impl RuntimeManager {
         }
 
         if !project_path.join("node_modules").exists() {
+            {
+                let mut entries = self.entries.lock().expect("runtime entries poisoned");
+                if let Some(entry) = entries.get_mut(&project.id) {
+                    entry.startup_timeline.dependency_install_required = true;
+                    entry.startup_timeline.dependency_install_started_at_ms =
+                        Some(Utc::now().timestamp_millis());
+                }
+            }
+
             self.consume_output(
                 app,
                 &project.id,
@@ -143,7 +153,6 @@ impl RuntimeManager {
                 app,
                 &project,
                 &project_path,
-                &runtime_path,
             )
             .await
             .map_err(|error| {
@@ -159,6 +168,14 @@ impl RuntimeManager {
                 message
             })?;
 
+            {
+                let mut entries = self.entries.lock().expect("runtime entries poisoned");
+                if let Some(entry) = entries.get_mut(&project.id) {
+                    entry.startup_timeline.dependency_install_finished_at_ms =
+                        Some(Utc::now().timestamp_millis());
+                }
+            }
+
             self.consume_output(
                 app,
                 &project.id,
@@ -167,25 +184,32 @@ impl RuntimeManager {
             );
         }
 
-        let (existing_logs, existing_log_sequence) = self
+        let (existing_logs, existing_log_sequence, existing_startup_timeline) = self
             .entries
             .lock()
             .expect("runtime entries poisoned")
             .get(&project.id)
-            .map(|entry| (entry.runtime.recent_logs.clone(), entry.log_sequence))
-            .unwrap_or_default();
+            .map(|entry| {
+                (
+                    entry.runtime.recent_logs.clone(),
+                    entry.log_sequence,
+                    entry.startup_timeline.clone(),
+                )
+            })
+            .unwrap_or_else(|| (Vec::new(), 0, RuntimeStartupTimeline::default()));
 
-        let mut command = Command::new("cmd.exe");
-        command
-            .args(["/d", "/s", "/c", project.start_command.as_str()])
-            .current_dir(&project_path)
-            .env("PATH", runtime_path)
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
-
-        #[cfg(target_os = "windows")]
-        command.creation_flags(CREATE_NO_WINDOW);
+        let mut command = create_async_context_command(
+            "cmd.exe",
+            vec![
+                "/d".to_string(),
+                "/s".to_string(),
+                "/c".to_string(),
+                project.start_command.clone(),
+            ],
+            Some(&project.node_version),
+            Some(&project_path),
+        )?;
+        command.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
 
         let mut child = command
             .spawn()
@@ -216,7 +240,11 @@ impl RuntimeManager {
             preview_priority: 0,
             log_sequence: existing_log_sequence,
             start_timestamp_ms,
-            selected_node_version: normalize_node_version(&project.node_version),
+            selected_node_version: selected_node_version.clone(),
+            startup_timeline: RuntimeStartupTimeline {
+                process_spawned_at_ms: Some(Utc::now().timestamp_millis()),
+                ..existing_startup_timeline
+            },
             runtime: ProjectRuntime {
                 project_id: project.id.clone(),
                 status: ProjectStatus::Starting,
@@ -295,35 +323,77 @@ impl RuntimeManager {
         _start_timestamp_ms: i64,
         message: String,
     ) {
-        let (failure_code, suggested_node_version) =
-            classify_runtime_failure(&message, selected_node_version);
-        self.entries
+        let completed_at_ms = Utc::now().timestamp_millis();
+        let mut entry = self
+            .entries
             .lock()
             .expect("runtime entries poisoned")
-            .remove(project_id);
+            .remove(project_id)
+            .unwrap_or_else(|| RuntimeEntry {
+                pid: 0,
+                expected_stop: false,
+                preview_priority: 0,
+                log_sequence: 0,
+                start_timestamp_ms: _start_timestamp_ms,
+                selected_node_version: normalize_node_version(selected_node_version),
+                startup_timeline: RuntimeStartupTimeline {
+                    environment_ready_at_ms: Some(completed_at_ms),
+                    ..RuntimeStartupTimeline::default()
+                },
+                runtime: ProjectRuntime {
+                    project_id: project_id.to_string(),
+                    status: ProjectStatus::Starting,
+                    pid: None,
+                    started_at: Some(started_at.clone()),
+                    exit_code: None,
+                    failure_message: None,
+                    failure_code: None,
+                    suggested_node_version: None,
+                    last_message: None,
+                    detected_url: None,
+                    detected_addresses: Vec::new(),
+                    startup_duration_ms: None,
+                    last_success_at: None,
+                    recent_logs: Vec::new(),
+                },
+            });
+
+        push_logs(
+            &mut entry,
+            ProjectLogLevel::System,
+            vec![message.clone()],
+        );
+        push_startup_timing_summary(
+            &mut entry,
+            completed_at_ms,
+            StartupTimingSummaryKind::Interrupted,
+        );
+
+        entry.runtime.status = ProjectStatus::Error;
+        entry.runtime.started_at = entry.runtime.started_at.or(Some(started_at));
+        entry.runtime.exit_code = None;
+        entry.runtime.last_message = Some(message.clone());
+        let failure_text = [
+            message.clone(),
+            entry
+                .runtime
+                .recent_logs
+                .iter()
+                .map(|log| log.message.clone())
+                .collect::<Vec<_>>()
+                .join("\n"),
+        ]
+        .join("\n");
+        let (failure_code, suggested_node_version) =
+            classify_runtime_failure(&failure_text, selected_node_version);
 
         emit_runtime_update(
             app,
             &ProjectRuntime {
-                project_id: project_id.to_string(),
-                status: ProjectStatus::Error,
-                pid: None,
-                started_at: Some(started_at),
-                exit_code: None,
-                last_message: Some(message.clone()),
-                failure_message: Some(message.clone()),
+                failure_message: Some(message),
                 failure_code,
                 suggested_node_version,
-                detected_url: None,
-                detected_addresses: Vec::new(),
-                startup_duration_ms: None,
-                last_success_at: None,
-                recent_logs: vec![ProjectLogEntry {
-                    id: format!("{project_id}-0"),
-                    at: now_iso(),
-                    level: ProjectLogLevel::System,
-                    message,
-                }],
+                ..entry.runtime
             },
         );
     }

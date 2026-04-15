@@ -8,6 +8,7 @@ import type { Feedback } from "./helpers";
 import { useProjectNodeActions } from "./use-project-node-actions";
 import { useProjectStartActions } from "./use-project-start-actions";
 import type {
+  NodeInstallProgress,
   NodeInstallRequest,
   NodeRetryRequest,
 } from "./use-project-dialog-state";
@@ -27,6 +28,7 @@ type UseProjectRunActionsOptions = {
   ) => Promise<void>;
   setFeedback: Dispatch<SetStateAction<Feedback | null>>;
   setIsInstallingNodeVersion: Dispatch<SetStateAction<boolean>>;
+  setNodeInstallProgress: Dispatch<SetStateAction<NodeInstallProgress | null>>;
   setNodeInstallRequest: Dispatch<SetStateAction<NodeInstallRequest | null>>;
   setNodeRetryTarget: Dispatch<SetStateAction<NodeRetryRequest | null>>;
   setProjectStartFailure: (projectId: string, message: string) => void;
@@ -45,6 +47,7 @@ export function useProjectRunActions({
   runLockedAction,
   setFeedback,
   setIsInstallingNodeVersion,
+  setNodeInstallProgress,
   setNodeInstallRequest,
   setNodeRetryTarget,
   setProjectStartFailure,
@@ -69,6 +72,7 @@ export function useProjectRunActions({
     handleInstallNodeVersionAndStart,
     handleInstallNodeVersionOnly,
     handleRetryProjectWithSuggestedNode,
+    handleSyncNodeVersionsFromNvm,
   } = useProjectNodeActions({
     loadProjectData,
     nodeInstallRequest,
@@ -76,6 +80,7 @@ export function useProjectRunActions({
     refreshProjectDiagnosis,
     setFeedback,
     setIsInstallingNodeVersion,
+    setNodeInstallProgress,
     setNodeInstallRequest,
     setNodeRetryTarget,
     showProjectOperationPanel,
@@ -86,6 +91,7 @@ export function useProjectRunActions({
     handleInstallNodeVersionAndStart,
     handleInstallNodeVersionOnly,
     handleRetryProjectWithSuggestedNode,
+    handleSyncNodeVersionsFromNvm,
     handleStartProject,
     handleStopProject,
   };

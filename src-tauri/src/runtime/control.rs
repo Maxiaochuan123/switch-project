@@ -1,3 +1,4 @@
+use chrono::Utc;
 use tauri::{AppHandle, Manager};
 use tauri_plugin_opener::OpenerExt;
 use tokio::time::{sleep, Duration};
@@ -7,7 +8,7 @@ use crate::contracts::{
 };
 
 use super::{
-    entry::push_logs,
+    entry::{push_logs, push_startup_timing_summary, StartupTimingSummaryKind},
     events::emit_runtime_update,
     failure::{build_runtime_failure_message, classify_runtime_failure},
     RuntimeManager,
@@ -124,6 +125,13 @@ impl RuntimeManager {
 
             entry.runtime.status = status;
             entry.runtime.exit_code = exit_code;
+            if entry.runtime.last_success_at.is_none() {
+                push_startup_timing_summary(
+                    &mut entry,
+                    Utc::now().timestamp_millis(),
+                    StartupTimingSummaryKind::Interrupted,
+                );
+            }
             if status == ProjectStatus::Error {
                 let failure_text = [
                     entry.runtime.last_message.clone().unwrap_or_default(),

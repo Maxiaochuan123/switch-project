@@ -18,6 +18,17 @@ export type Feedback = {
   message: string;
 };
 
+const STARTUP_TIMING_LOG_PREFIXES = ["启动耗时拆解", "启动未完成，耗时拆解"] as const;
+
+function extractErrorText(error: unknown, key: "message" | "detail") {
+  if (!error || typeof error !== "object") {
+    return null;
+  }
+
+  const value = (error as Record<string, unknown>)[key];
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
 export type ProjectCardPanelState =
   | {
       kind: "operation";
@@ -47,6 +58,20 @@ export type ProjectCardPanelState =
     };
 
 export function getErrorMessage(error: unknown) {
+  if (typeof error === "string" && error.trim()) {
+    return error.trim();
+  }
+
+  const detail = extractErrorText(error, "detail");
+  if (detail) {
+    return detail;
+  }
+
+  const message = extractErrorText(error, "message");
+  if (message) {
+    return message;
+  }
+
   return error instanceof Error && error.message.trim()
     ? error.message
     : getDefaultErrorMessage();
@@ -291,7 +316,9 @@ export function areDesktopEnvironmentsEqual(left: DesktopEnvironment, right: Des
   if (
     left.activeNodeVersion !== right.activeNodeVersion ||
     left.rimrafInstalled !== right.rimrafInstalled ||
-    left.nvmHome !== right.nvmHome
+    left.nodeManager !== right.nodeManager ||
+    left.nodeManagerAvailable !== right.nodeManagerAvailable ||
+    left.nodeManagerVersion !== right.nodeManagerVersion
   ) {
     return false;
   }
@@ -302,6 +329,16 @@ export function areDesktopEnvironmentsEqual(left: DesktopEnvironment, right: Des
 
   for (let index = 0; index < left.installedNodeVersions.length; index += 1) {
     if (left.installedNodeVersions[index] !== right.installedNodeVersions[index]) {
+      return false;
+    }
+  }
+
+  if (left.nvmInstalledNodeVersions.length !== right.nvmInstalledNodeVersions.length) {
+    return false;
+  }
+
+  for (let index = 0; index < left.nvmInstalledNodeVersions.length; index += 1) {
+    if (left.nvmInstalledNodeVersions[index] !== right.nvmInstalledNodeVersions[index]) {
       return false;
     }
   }
@@ -408,6 +445,48 @@ export function getProjectRuntimeErrorMessage(runtime?: ProjectRuntime) {
     .find(Boolean);
 
   return runtime.lastMessage?.trim() || recentLogMessage || "启动失败，请查看终端输出。";
+}
+
+export function isStartupTimingLogMessage(message: string) {
+  const trimmedMessage = message.trim();
+  return STARTUP_TIMING_LOG_PREFIXES.some((prefix) =>
+    trimmedMessage.startsWith(prefix)
+  );
+}
+
+export function getLatestStartupTimingSummary(logs: ProjectLogEntry[] | undefined) {
+  if (!logs?.length) {
+    return null;
+  }
+
+  return (
+    [...logs]
+      .reverse()
+      .map((entry) => entry.message.trim())
+      .find((message) => isStartupTimingLogMessage(message)) ?? null
+  );
+}
+
+export function getStartupTimingSummaryParts(summary: string | null) {
+  if (!summary) {
+    return [];
+  }
+
+  return summary
+    .split("|")
+    .map((part) => part.trim())
+    .filter(Boolean);
+}
+
+export function getProjectTerminalText(logs: ProjectLogEntry[] | undefined) {
+  if (!logs?.length) {
+    return "";
+  }
+
+  return logs
+    .map((entry) => entry.message.trimEnd())
+    .filter((message) => Boolean(message) && !isStartupTimingLogMessage(message))
+    .join("\n");
 }
 
 export function getProjectTerminalPreview(logs: ProjectLogEntry[] | undefined) {

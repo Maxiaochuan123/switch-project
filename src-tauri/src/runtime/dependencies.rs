@@ -9,10 +9,11 @@ use tokio::{process::Command, task};
 use crate::contracts::{
     build_install_command, DependencyOperation, OperationStatus, ProjectConfig, ProjectLogLevel,
 };
+use crate::node_manager::list_installed_node_versions;
 
 use super::{
     environment::{
-        build_project_runtime_path, ensure_package_manager_available, is_command_available,
+        create_context_command, ensure_package_manager_available, is_command_available,
         resolve_global_command_path,
     },
     events::emit_dependency_operation,
@@ -190,8 +191,7 @@ pub async fn run_reinstall_project_node_modules_task(app: AppHandle, project: Pr
             None,
         );
 
-        let runtime_path = build_project_runtime_path(&project.node_version);
-        install_project_dependencies_if_missing(&project, &project_path, &runtime_path).await
+        install_project_dependencies_if_missing(&project, &project_path).await
     }
     .await;
 
@@ -223,7 +223,7 @@ pub async fn run_reinstall_project_node_modules_task(app: AppHandle, project: Pr
 }
 
 pub async fn ensure_delete_tool_ready() -> Result<bool, String> {
-    if resolve_global_command_path("rimraf", None)?.is_some() {
+    if resolve_any_rimraf_command_path()?.is_some() {
         return Ok(false);
     }
 
@@ -231,32 +231,31 @@ pub async fn ensure_delete_tool_ready() -> Result<bool, String> {
 }
 
 pub fn is_delete_tool_ready() -> Result<bool, String> {
-    Ok(resolve_global_command_path("rimraf", None)?.is_some())
+    Ok(resolve_any_rimraf_command_path()?.is_some())
 }
 
 pub(super) async fn install_project_dependencies_if_missing(
     project: &ProjectConfig,
     project_path: &Path,
-    runtime_path: &str,
 ) -> Result<(), String> {
-    ensure_package_manager_available(project.package_manager, runtime_path)?;
+    ensure_package_manager_available(project.package_manager, &project.node_version)?;
 
     let install_command = build_install_command(project.package_manager);
-    let mut command = Command::new("cmd.exe");
-    command
-        .args(["/d", "/s", "/c", install_command.as_str()])
-        .current_dir(project_path)
-        .env("PATH", runtime_path)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-
-    #[cfg(target_os = "windows")]
-    command.creation_flags(CREATE_NO_WINDOW);
+    let mut command = create_context_command(
+        "cmd.exe",
+        vec![
+            "/d".to_string(),
+            "/s".to_string(),
+            "/c".to_string(),
+            install_command,
+        ],
+        Some(&project.node_version),
+        Some(project_path),
+    )?;
+    command.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
 
     let output = command
         .output()
-        .await
         .map_err(|error| format!("安装依赖失败: {error}"))?;
 
     if output.status.success() {
@@ -273,26 +272,25 @@ pub(super) async fn install_project_dependencies_if_missing_with_logs(
     app: &AppHandle,
     project: &ProjectConfig,
     project_path: &Path,
-    runtime_path: &str,
 ) -> Result<(), String> {
-    ensure_package_manager_available(project.package_manager, runtime_path)?;
+    ensure_package_manager_available(project.package_manager, &project.node_version)?;
 
     let install_command = build_install_command(project.package_manager);
-    let mut command = Command::new("cmd.exe");
-    command
-        .args(["/d", "/s", "/c", install_command.as_str()])
-        .current_dir(project_path)
-        .env("PATH", runtime_path)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-
-    #[cfg(target_os = "windows")]
-    command.creation_flags(CREATE_NO_WINDOW);
+    let mut command = create_context_command(
+        "cmd.exe",
+        vec![
+            "/d".to_string(),
+            "/s".to_string(),
+            "/c".to_string(),
+            install_command,
+        ],
+        Some(&project.node_version),
+        Some(project_path),
+    )?;
+    command.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
 
     let output = command
         .output()
-        .await
         .map_err(|error| format!("自动安装依赖失败: {error}"))?;
 
     let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
@@ -316,31 +314,39 @@ pub(super) async fn install_project_dependencies_if_missing_with_logs(
 }
 
 async fn ensure_rimraf_available() -> Result<String, String> {
-    if let Some(command_path) = resolve_global_command_path("rimraf", None)? {
+    if let Some(command_path) = resolve_any_rimraf_command_path()? {
         return Ok(command_path);
     }
 
-    if !is_command_available("npm", None)? {
+    let installer_node_version = if is_command_available("npm", None)? {
+        None
+    } else {
+        list_installed_node_versions().into_iter().next()
+    };
+
+    if installer_node_version.is_none() && !is_command_available("npm", None)? {
         return Err("未找到 npm，无法自动安装 rimraf。".to_string());
     }
 
-    let mut command = Command::new("cmd.exe");
-    command
-        .args(["/d", "/s", "/c", "npm install -g rimraf"])
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::piped());
-
-    #[cfg(target_os = "windows")]
-    command.creation_flags(CREATE_NO_WINDOW);
+    let mut command = create_context_command(
+        "cmd.exe",
+        vec![
+            "/d".to_string(),
+            "/s".to_string(),
+            "/c".to_string(),
+            "npm install -g rimraf".to_string(),
+        ],
+        installer_node_version.as_deref(),
+        None,
+    )?;
+    command.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::piped());
 
     let output = command
         .output()
-        .await
         .map_err(|error| format!("安装 rimraf 失败: {error}"))?;
 
     if output.status.success() {
-        if let Some(command_path) = resolve_global_command_path("rimraf", None)? {
+        if let Some(command_path) = resolve_global_command_path("rimraf", installer_node_version.as_deref())? {
             return Ok(command_path);
         }
     }
@@ -351,4 +357,18 @@ async fn ensure_rimraf_available() -> Result<String, String> {
     } else {
         Err(format!("安装 rimraf 失败: {stderr}"))
     }
+}
+
+fn resolve_any_rimraf_command_path() -> Result<Option<String>, String> {
+    if let Some(command_path) = resolve_global_command_path("rimraf", None)? {
+        return Ok(Some(command_path));
+    }
+
+    for version in list_installed_node_versions() {
+        if let Some(command_path) = resolve_global_command_path("rimraf", Some(&version))? {
+            return Ok(Some(command_path));
+        }
+    }
+
+    Ok(None)
 }

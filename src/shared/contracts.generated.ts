@@ -1,7 +1,7 @@
 // This file is generated from Rust contracts. Do not edit by hand.
 // Run `npm run contracts:generate` to refresh it.
 
-export type BackendErrorCode = "unknown" | "invalid-project" | "project-not-found" | "project-running" | "project-path-missing" | "node-version-mismatch" | "node-version-missing" | "missing-dependencies" | "package-manager-missing" | "start-command-missing" | "startup-command-failed" | "nvm-missing" | "store-read-failed" | "store-write-failed" | "import-failed" | "export-failed";
+export type BackendErrorCode = "unknown" | "invalid-project" | "project-not-found" | "project-running" | "project-path-missing" | "node-version-mismatch" | "node-version-missing" | "missing-dependencies" | "package-manager-missing" | "start-command-missing" | "startup-command-failed" | "node-manager-missing" | "store-read-failed" | "store-write-failed" | "import-failed" | "export-failed";
 
 export type BackendError = { code: BackendErrorCode, message: string, detail?: string, };
 
@@ -21,7 +21,13 @@ export type ProjectLogEntry = { id: string, at: string, level: ProjectLogLevel, 
 
 export type ProjectRuntime = { projectId: string, status: ProjectStatus, pid?: number, startedAt?: string, exitCode?: number, lastMessage?: string, failureMessage?: string, failureCode?: BackendErrorCode, suggestedNodeVersion?: string, detectedUrl?: string, detectedAddresses: Array<ProjectAddress>, startupDurationMs?: number, lastSuccessAt?: string, recentLogs: Array<ProjectLogEntry>, };
 
-export type DesktopEnvironment = { installedNodeVersions: Array<string>, activeNodeVersion: string | null, availablePackageManagers: Array<ProjectPackageManager>, rimrafInstalled: boolean, nvmHome: string | null, };
+export type NodeManagerKind = "fnm";
+
+export type NodeManagerInstallAttempt = { installer: string, command: string, exitCode?: number, stdout?: string, stderr?: string, };
+
+export type NodeManagerInstallResult = { success: boolean, message: string, installer?: string, version?: string, attempts: Array<NodeManagerInstallAttempt>, };
+
+export type DesktopEnvironment = { installedNodeVersions: Array<string>, nvmInstalledNodeVersions: Array<string>, activeNodeVersion: string | null, availablePackageManagers: Array<ProjectPackageManager>, rimrafInstalled: boolean, nodeManager: NodeManagerKind, nodeManagerAvailable: boolean, nodeManagerVersion: string | null, };
 
 export type ProjectNodeVersionSource = "nvmrc" | "node-version" | "volta" | "package-engines";
 

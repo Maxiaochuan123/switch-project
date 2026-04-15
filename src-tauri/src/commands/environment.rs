@@ -2,10 +2,17 @@ use tauri::{AppHandle, State};
 use tauri_plugin_opener::OpenerExt;
 
 use crate::{
-    contracts::{AppStartupSettings, DesktopEnvironment},
+    contracts::{AppStartupSettings, DesktopEnvironment, NodeManagerInstallResult},
     lock_error,
-    node_versions::install_node_version as install_node_version_impl,
-    runtime::open_project_terminal as open_project_terminal_window,
+    node_manager::{
+        clear_node_manager_cache,
+        install_node_manager as install_node_manager_impl,
+        install_node_version as install_node_version_impl,
+    },
+    runtime::{
+        clear_command_resolution_cache,
+        open_project_terminal as open_project_terminal_window,
+    },
     ManagedState,
 };
 
@@ -17,8 +24,22 @@ pub fn get_environment() -> Result<DesktopEnvironment, String> {
 }
 
 #[tauri::command]
+pub async fn install_node_manager() -> NodeManagerInstallResult {
+    let result = install_node_manager_impl().await;
+    if result.success {
+        clear_node_manager_cache();
+        clear_command_resolution_cache();
+    }
+
+    result
+}
+
+#[tauri::command]
 pub async fn install_node_version(version: String) -> Result<(), String> {
-    install_node_version_impl(&version).await
+    install_node_version_impl(&version).await?;
+    clear_node_manager_cache();
+    clear_command_resolution_cache();
+    Ok(())
 }
 
 #[tauri::command]
