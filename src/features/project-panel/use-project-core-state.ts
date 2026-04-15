@@ -4,6 +4,7 @@ import {
   type AppStartupSettings,
   type DesktopEnvironment,
   type ProjectConfig,
+  type ProjectGroup,
 } from "@/shared/contracts";
 import { areProjectListsEqual } from "./helpers";
 
@@ -20,6 +21,7 @@ const DEFAULT_ENVIRONMENT: DesktopEnvironment = {
 
 export function useProjectCoreState() {
   const [projects, setProjects] = useState<ProjectConfig[]>([]);
+  const [projectGroups, setProjectGroups] = useState<ProjectGroup[]>([]);
   const [environment, setEnvironment] = useState<DesktopEnvironment>(DEFAULT_ENVIRONMENT);
   const [startupSettings, setStartupSettings] = useState<AppStartupSettings>(
     DEFAULT_APP_STARTUP_SETTINGS
@@ -51,8 +53,10 @@ export function useProjectCoreState() {
     formError,
     getProjectById,
     projects,
+    projectGroups,
     setEnvironment,
     setFormError,
+    setProjectGroups,
     setStartupSettings,
     startupSettings,
     syncProjects,

@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     fs,
     path::{Path, PathBuf},
 };
@@ -6,8 +7,8 @@ use std::{
 use serde::{Deserialize, Serialize};
 
 use crate::contracts::{
-    AppStartupSettings, ImportProjectsResult, ProjectConfig, ProjectPackageManager,
-    default_project_package_manager, normalize_node_version,
+    default_project_package_manager, normalize_node_version, AppStartupSettings,
+    ImportProjectsResult, ProjectConfig, ProjectGroup, ProjectGroupsExport, ProjectPackageManager,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -16,6 +17,8 @@ struct StoreData {
     #[serde(default)]
     projects: Vec<ProjectConfig>,
     #[serde(default)]
+    project_groups: Vec<ProjectGroup>,
+    #[serde(default)]
     app_startup_settings: AppStartupSettings,
 }
 
@@ -23,6 +26,7 @@ impl Default for StoreData {
     fn default() -> Self {
         Self {
             projects: Vec::new(),
+            project_groups: Vec::new(),
             app_startup_settings: AppStartupSettings::default(),
         }
     }
@@ -34,6 +38,7 @@ struct LegacyProjectConfig {
     id: Option<String>,
     name: Option<String>,
     path: Option<String>,
+    group_id: Option<String>,
     node_version: Option<String>,
     package_manager: Option<ProjectPackageManager>,
     start_command: Option<String>,
@@ -51,6 +56,8 @@ struct LegacyStoreData {
     #[serde(default)]
     projects: Vec<LegacyProjectConfig>,
     #[serde(default)]
+    project_groups: Vec<ProjectGroup>,
+    #[serde(default)]
     app_startup_settings: AppStartupSettings,
 }
 
@@ -58,6 +65,7 @@ struct LegacyStoreData {
 #[serde(untagged)]
 enum ImportedProjectsFile {
     Projects(Vec<ProjectConfig>),
+    Export(ProjectGroupsExport),
     Wrapped { projects: Vec<ProjectConfig> },
 }
 
@@ -94,6 +102,12 @@ impl AppStore {
         self.data.projects.clone()
     }
 
+    pub fn list_project_groups(&self) -> Vec<ProjectGroup> {
+        let mut groups = self.data.project_groups.clone();
+        normalize_project_group_orders(&mut groups);
+        groups
+    }
+
     pub fn get_project(&self, project_id: &str) -> Option<ProjectConfig> {
         self.data
             .projects
@@ -104,6 +118,10 @@ impl AppStore {
 
     pub fn save_project(&mut self, project: ProjectConfig) -> Result<(), String> {
         let next_project = normalize_project(project)?;
+        validate_project_group_reference(
+            &self.data.project_groups,
+            next_project.group_id.as_deref(),
+        )?;
 
         if let Some(index) = self
             .data
@@ -130,23 +148,134 @@ impl AppStore {
     }
 
     pub fn delete_project(&mut self, project_id: &str) -> Result<(), String> {
-        self.data.projects.retain(|project| project.id != project_id);
+        self.data
+            .projects
+            .retain(|project| project.id != project_id);
         self.persist()
     }
 
+    pub fn create_project_group(&mut self, name: &str) -> Result<ProjectGroup, String> {
+        let normalized_name = normalize_project_group_name(name)?;
+        ensure_project_group_name_available(&self.data.project_groups, &normalized_name, None)?;
+
+        let group = ProjectGroup {
+            id: uuid::Uuid::new_v4().to_string(),
+            name: normalized_name,
+            order: self.data.project_groups.len() as u32,
+        };
+
+        self.data.project_groups.push(group.clone());
+        normalize_project_group_orders(&mut self.data.project_groups);
+        self.persist()?;
+
+        Ok(group)
+    }
+
+    pub fn update_project_group(&mut self, group: ProjectGroup) -> Result<ProjectGroup, String> {
+        let normalized_name = normalize_project_group_name(&group.name)?;
+        ensure_project_group_name_available(
+            &self.data.project_groups,
+            &normalized_name,
+            Some(group.id.as_str()),
+        )?;
+
+        let Some(existing_group_index) = self
+            .data
+            .project_groups
+            .iter()
+            .position(|current| current.id == group.id)
+        else {
+            return Err("分组不存在。".to_string());
+        };
+
+        self.data.project_groups[existing_group_index].name = normalized_name;
+        self.persist()?;
+
+        Ok(self.data.project_groups[existing_group_index].clone())
+    }
+
+    pub fn delete_project_group(&mut self, group_id: &str) -> Result<(), String> {
+        let initial_length = self.data.project_groups.len();
+        self.data
+            .project_groups
+            .retain(|group| group.id != group_id);
+
+        if self.data.project_groups.len() == initial_length {
+            return Err("分组不存在。".to_string());
+        }
+
+        for project in &mut self.data.projects {
+            if project.group_id.as_deref() == Some(group_id) {
+                project.group_id = None;
+            }
+        }
+
+        normalize_project_group_orders(&mut self.data.project_groups);
+        self.persist()
+    }
+
+    pub fn reorder_project_groups(
+        &mut self,
+        group_ids: &[String],
+    ) -> Result<Vec<ProjectGroup>, String> {
+        if group_ids.len() != self.data.project_groups.len() {
+            return Err("分组排序数据不完整。".to_string());
+        }
+
+        let mut next_groups = Vec::with_capacity(self.data.project_groups.len());
+
+        for (index, group_id) in group_ids.iter().enumerate() {
+            let Some(group) = self
+                .data
+                .project_groups
+                .iter()
+                .find(|current| current.id == *group_id)
+                .cloned()
+            else {
+                return Err("存在未知分组，无法排序。".to_string());
+            };
+
+            next_groups.push(ProjectGroup {
+                order: index as u32,
+                ..group
+            });
+        }
+
+        self.data.project_groups = next_groups;
+        normalize_project_group_orders(&mut self.data.project_groups);
+        self.persist()?;
+
+        Ok(self.list_project_groups())
+    }
+
     pub fn import_projects(&mut self, path: &str) -> Result<ImportProjectsResult, String> {
-        let imported_projects = read_import_projects(path)?;
+        let imported = read_import_projects(path)?;
         let mut result = ImportProjectsResult {
             added: 0,
             updated: 0,
             skipped: 0,
         };
 
-        for project in imported_projects {
-            let Ok(normalized_project) = normalize_project(project) else {
+        let imported_group_id_map = self.merge_imported_project_groups(imported.project_groups)?;
+
+        for project in imported.projects {
+            let Ok(mut normalized_project) = normalize_project(project) else {
                 result.skipped += 1;
                 continue;
             };
+
+            normalized_project.group_id =
+                remap_imported_group_id(normalized_project.group_id.take(), &imported_group_id_map);
+
+            if validate_project_group_reference(
+                &self.data.project_groups,
+                normalized_project.group_id.as_deref(),
+            )
+            .is_err()
+            {
+                result.skipped += 1;
+                continue;
+            }
 
             if let Some(index) = self
                 .data
@@ -185,13 +314,16 @@ impl AppStore {
     pub fn export_projects(&self, path: &str) -> Result<(), String> {
         let export_path = PathBuf::from(path);
         if let Some(parent) = export_path.parent() {
-            fs::create_dir_all(parent).map_err(|error| format!("创建导出目录失败: {error}"))?;
+            fs::create_dir_all(parent).map_err(|error| format!("创建备份目录失败: {error}"))?;
         }
 
-        let contents = serde_json::to_string_pretty(&self.data.projects)
-            .map_err(|error| format!("序列化项目配置失败: {error}"))?;
+        let contents = serde_json::to_string_pretty(&ProjectGroupsExport {
+            project_groups: self.list_project_groups(),
+            projects: self.data.projects.clone(),
+        })
+        .map_err(|error| format!("序列化备份数据失败: {error}"))?;
 
-        fs::write(&export_path, contents).map_err(|error| format!("导出项目配置失败: {error}"))
+        fs::write(&export_path, contents).map_err(|error| format!("创建备份文件失败: {error}"))
     }
 
     pub fn get_app_startup_settings(&self) -> AppStartupSettings {
@@ -207,13 +339,67 @@ impl AppStore {
     }
 
     fn normalize(&mut self) {
+        normalize_project_group_orders(&mut self.data.project_groups);
         self.data.projects = self
             .data
             .projects
             .clone()
             .into_iter()
             .filter_map(|project| normalize_project(project).ok())
+            .map(|mut project| {
+                if !group_exists(&self.data.project_groups, project.group_id.as_deref()) {
+                    project.group_id = None;
+                }
+                project
+            })
             .collect();
+    }
+
+    fn merge_imported_project_groups(
+        &mut self,
+        groups: Vec<ProjectGroup>,
+    ) -> Result<HashMap<String, String>, String> {
+        let mut changed = false;
+        let mut group_id_map = HashMap::new();
+
+        for group in groups {
+            let normalized_name = normalize_project_group_name(&group.name)?;
+            let imported_group_id = group.id;
+
+            if let Some(existing_group) = self
+                .data
+                .project_groups
+                .iter()
+                .find(|current| current.id == imported_group_id)
+            {
+                group_id_map.insert(imported_group_id.clone(), existing_group.id.clone());
+                continue;
+            }
+
+            if let Some(existing_group) = self
+                .data
+                .project_groups
+                .iter()
+                .find(|current| current.name.eq_ignore_ascii_case(&normalized_name))
+            {
+                group_id_map.insert(imported_group_id, existing_group.id.clone());
+                continue;
+            }
+
+            self.data.project_groups.push(ProjectGroup {
+                id: imported_group_id.clone(),
+                name: normalized_name,
+                order: self.data.project_groups.len() as u32,
+            });
+            group_id_map.insert(imported_group_id.clone(), imported_group_id);
+            changed = true;
+        }
+
+        if changed {
+            normalize_project_group_orders(&mut self.data.project_groups);
+        }
+
+        Ok(group_id_map)
     }
 
     fn persist(&self) -> Result<(), String> {
@@ -221,8 +407,8 @@ impl AppStore {
             fs::create_dir_all(parent).map_err(|error| format!("创建数据目录失败: {error}"))?;
         }
 
-        let contents =
-            serde_json::to_string_pretty(&self.data).map_err(|error| format!("序列化配置失败: {error}"))?;
+        let contents = serde_json::to_string_pretty(&self.data)
+            .map_err(|error| format!("序列化配置失败: {error}"))?;
 
         fs::write(&self.path, contents).map_err(|error| format!("写入配置失败: {error}"))
     }
@@ -242,14 +428,22 @@ fn read_store_data(path: &Path) -> Result<StoreData, String> {
     serde_json::from_str::<StoreData>(&contents).map_err(|error| format!("解析配置失败: {error}"))
 }
 
-fn read_import_projects(path: &str) -> Result<Vec<ProjectConfig>, String> {
-    let contents = fs::read_to_string(path).map_err(|error| format!("读取导入文件失败: {error}"))?;
+fn read_import_projects(path: &str) -> Result<ProjectGroupsExport, String> {
+    let contents =
+        fs::read_to_string(path).map_err(|error| format!("读取备份文件失败: {error}"))?;
     let parsed = serde_json::from_str::<ImportedProjectsFile>(&contents)
-        .map_err(|error| format!("解析导入文件失败: {error}"))?;
+        .map_err(|error| format!("解析备份文件失败: {error}"))?;
 
     Ok(match parsed {
-        ImportedProjectsFile::Projects(projects) => projects,
-        ImportedProjectsFile::Wrapped { projects } => projects,
+        ImportedProjectsFile::Projects(projects) => ProjectGroupsExport {
+            project_groups: Vec::new(),
+            projects,
+        },
+        ImportedProjectsFile::Export(export) => export,
+        ImportedProjectsFile::Wrapped { projects } => ProjectGroupsExport {
+            project_groups: Vec::new(),
+            projects,
+        },
     })
 }
 
@@ -257,10 +451,12 @@ fn migrate_legacy_store(path: &Path) -> StoreData {
     let contents = fs::read_to_string(path).unwrap_or_default();
     let legacy = serde_json::from_str::<LegacyStoreData>(&contents).unwrap_or(LegacyStoreData {
         projects: Vec::new(),
+        project_groups: Vec::new(),
         app_startup_settings: AppStartupSettings::default(),
     });
 
     StoreData {
+        project_groups: legacy.project_groups,
         projects: legacy
             .projects
             .into_iter()
@@ -269,6 +465,7 @@ fn migrate_legacy_store(path: &Path) -> StoreData {
                     id: project.id.unwrap_or_default(),
                     name: project.name.unwrap_or_default(),
                     path: project.path.unwrap_or_default(),
+                    group_id: project.group_id,
                     node_version: project.node_version.unwrap_or_default(),
                     package_manager: project
                         .package_manager
@@ -300,10 +497,17 @@ fn normalize_project(project: ProjectConfig) -> Result<ProjectConfig, String> {
 
     let absolute_path = make_absolute_path(&project.path)?;
 
+    let normalized_group_id = project
+        .group_id
+        .as_ref()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+
     Ok(ProjectConfig {
         id: project.id.trim().to_string(),
         name: project.name.trim().to_string(),
         path: absolute_path,
+        group_id: normalized_group_id,
         node_version: normalize_node_version(&project.node_version),
         package_manager: infer_project_package_manager(&project),
         start_command: project.start_command.trim().to_string(),
@@ -340,4 +544,193 @@ fn make_absolute_path(raw_path: &str) -> Result<String, String> {
     let current_dir =
         std::env::current_dir().map_err(|error| format!("读取当前目录失败: {error}"))?;
     Ok(current_dir.join(path).to_string_lossy().to_string())
+}
+
+fn normalize_project_group_name(name: &str) -> Result<String, String> {
+    let normalized_name = name.trim();
+
+    if normalized_name.is_empty() {
+        return Err("分组名称不能为空。".to_string());
+    }
+
+    if normalized_name.eq_ignore_ascii_case("未分组") {
+        return Err("“未分组”是系统保留名称，请换一个分组名。".to_string());
+    }
+
+    Ok(normalized_name.to_string())
+}
+
+fn ensure_project_group_name_available(
+    groups: &[ProjectGroup],
+    name: &str,
+    current_group_id: Option<&str>,
+) -> Result<(), String> {
+    if groups.iter().any(|group| {
+        group.name.eq_ignore_ascii_case(name)
+            && current_group_id.is_none_or(|group_id| group.id != group_id)
+    }) {
+        return Err("分组名称已存在，请换一个名字。".to_string());
+    }
+
+    Ok(())
+}
+
+fn normalize_project_group_orders(groups: &mut [ProjectGroup]) {
+    groups.sort_by(|left, right| {
+        left.order
+            .cmp(&right.order)
+            .then_with(|| left.name.to_lowercase().cmp(&right.name.to_lowercase()))
+    });
+
+    for (index, group) in groups.iter_mut().enumerate() {
+        group.order = index as u32;
+    }
+}
+
+fn remap_imported_group_id(
+    group_id: Option<String>,
+    group_id_map: &HashMap<String, String>,
+) -> Option<String> {
+    group_id.map(|current_group_id| {
+        group_id_map
+            .get(&current_group_id)
+            .cloned()
+            .unwrap_or(current_group_id)
+    })
+}
+
+fn group_exists(groups: &[ProjectGroup], group_id: Option<&str>) -> bool {
+    let Some(group_id) = group_id else {
+        return true;
+    };
+
+    groups.iter().any(|group| group.id == group_id)
+}
+
+fn validate_project_group_reference(
+    groups: &[ProjectGroup],
+    group_id: Option<&str>,
+) -> Result<(), String> {
+    if group_exists(groups, group_id) {
+        Ok(())
+    } else {
+        Err("所选分组不存在，请重新选择。".to_string())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{env, fs};
+
+    use crate::contracts::{
+        AppStartupSettings, ProjectConfig, ProjectGroupsExport, ProjectPackageManager,
+    };
+
+    use super::{group_exists, normalize_project_group_orders, AppStore, ProjectGroup, StoreData};
+
+    fn build_project(id: &str, path: &str, group_id: Option<&str>) -> ProjectConfig {
+        ProjectConfig {
+            id: id.to_string(),
+            name: format!("Project {id}"),
+            path: path.to_string(),
+            group_id: group_id.map(str::to_string),
+            node_version: "20.0.0".to_string(),
+            package_manager: ProjectPackageManager::Npm,
+            start_command: "npm run dev".to_string(),
+            auto_start_on_app_launch: false,
+            auto_open_local_url_on_start: false,
+        }
+    }
+
+    #[test]
+    fn normalize_project_group_orders_compacts_order_values() {
+        let mut groups = vec![
+            ProjectGroup {
+                id: "b".to_string(),
+                name: "B".to_string(),
+                order: 4,
+            },
+            ProjectGroup {
+                id: "a".to_string(),
+                name: "A".to_string(),
+                order: 1,
+            },
+        ];
+
+        normalize_project_group_orders(&mut groups);
+
+        assert_eq!(groups[0].id, "a");
+        assert_eq!(groups[0].order, 0);
+        assert_eq!(groups[1].id, "b");
+        assert_eq!(groups[1].order, 1);
+    }
+
+    #[test]
+    fn group_exists_treats_missing_group_as_ungrouped() {
+        let store = StoreData::default();
+        assert!(group_exists(&store.project_groups, None));
+    }
+
+    #[test]
+    fn import_projects_reuses_existing_group_ids_for_same_named_groups() {
+        let temp_dir = env::temp_dir();
+        let store_path = temp_dir.join(format!(
+            "switch-project-store-{}.json",
+            uuid::Uuid::new_v4()
+        ));
+        let import_path = temp_dir.join(format!(
+            "switch-project-backup-{}.json",
+            uuid::Uuid::new_v4()
+        ));
+        let project_path = temp_dir
+            .join(format!("switch-project-app-{}", uuid::Uuid::new_v4()))
+            .to_string_lossy()
+            .to_string();
+
+        let mut store = AppStore {
+            path: store_path.clone(),
+            data: StoreData {
+                projects: Vec::new(),
+                project_groups: vec![ProjectGroup {
+                    id: "local-group".to_string(),
+                    name: "Frontend".to_string(),
+                    order: 0,
+                }],
+                app_startup_settings: AppStartupSettings::default(),
+            },
+        };
+
+        let backup = ProjectGroupsExport {
+            project_groups: vec![ProjectGroup {
+                id: "backup-group".to_string(),
+                name: "Frontend".to_string(),
+                order: 0,
+            }],
+            projects: vec![build_project(
+                "project-1",
+                &project_path,
+                Some("backup-group"),
+            )],
+        };
+
+        fs::write(&import_path, serde_json::to_string_pretty(&backup).unwrap()).unwrap();
+
+        let result = store
+            .import_projects(import_path.to_str().unwrap())
+            .unwrap();
+        let restored_projects = store.list_projects();
+
+        assert_eq!(result.added, 1);
+        assert_eq!(result.updated, 0);
+        assert_eq!(result.skipped, 0);
+        assert_eq!(store.list_project_groups().len(), 1);
+        assert_eq!(restored_projects.len(), 1);
+        assert_eq!(
+            restored_projects[0].group_id.as_deref(),
+            Some("local-group")
+        );
+
+        let _ = fs::remove_file(import_path);
+        let _ = fs::remove_file(store_path);
+    }
 }

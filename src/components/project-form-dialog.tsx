@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef } from "react";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Controller, useForm } from "react-hook-form";
 import { z } from "zod";
-import { AlertTriangle, FolderOpen, Info, LoaderCircle } from "lucide-react";
+import { AlertTriangle, FolderOpen, Info, LoaderCircle, Plus } from "lucide-react";
 import { DropzoneField } from "@/components/dropzone-field";
 import { NodeInstallProgress } from "@/components/node-install-progress";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -38,6 +38,7 @@ import {
 import {
   getPackageManagerLabel,
   normalizeNodeVersion,
+  type ProjectGroup,
   type ProjectDirectoryInspection,
   type ProjectPackageManager,
 } from "@/shared/contracts";
@@ -46,6 +47,7 @@ import type { NodeInstallProgress as NodeInstallProgressState } from "@/features
 const projectDraftSchema = z.object({
   name: z.string().trim().min(1, "请输入项目名称"),
   path: z.string().trim().min(1, "请选择项目目录"),
+  groupId: z.string().nullable(),
   nodeVersion: z.string().trim().min(1, "请选择 Node 版本"),
   packageManager: z.string().trim().min(1, "请选择包管理器"),
   startCommand: z.string().trim().min(1, "请输入启动命令"),
@@ -62,6 +64,7 @@ type ProjectFormDialogProps = {
   installedNodeVersions: string[];
   nvmInstalledNodeVersions: string[];
   activeNodeVersion: string | null;
+  projectGroups: ProjectGroup[];
   installedPackageManagers: ProjectPackageManager[];
   isSubmitting: boolean;
   isInspectingProject: boolean;
@@ -74,6 +77,7 @@ type ProjectFormDialogProps = {
   onInstallNodeVersion: (version: string) => void;
   onBrowsePath: () => void;
   onOpenChange: (open: boolean) => void;
+  onOpenCreateGroup: () => void;
   onSubmit: (draft: ProjectDraft) => void;
 };
 
@@ -133,6 +137,7 @@ export function ProjectFormDialog({
   installedNodeVersions,
   nvmInstalledNodeVersions,
   activeNodeVersion,
+  projectGroups,
   installedPackageManagers,
   isSubmitting,
   isInspectingProject,
@@ -145,6 +150,7 @@ export function ProjectFormDialog({
   onInstallNodeVersion,
   onBrowsePath,
   onOpenChange,
+  onOpenCreateGroup,
   onSubmit,
 }: ProjectFormDialogProps) {
   const isEditing = Boolean(draft.id);
@@ -159,6 +165,7 @@ export function ProjectFormDialog({
     defaultValues: {
       name: draft.name,
       path: draft.path,
+      groupId: draft.groupId,
       nodeVersion: draft.nodeVersion,
       packageManager: draft.packageManager,
       startCommand: draft.startCommand,
@@ -171,6 +178,7 @@ export function ProjectFormDialog({
     form.reset({
       name: draft.name,
       path: draft.path,
+      groupId: draft.groupId,
       nodeVersion: draft.nodeVersion,
       packageManager: draft.packageManager,
       startCommand: draft.startCommand,
@@ -357,6 +365,7 @@ export function ProjectFormDialog({
   const dialogTitle = draft.id ? "编辑项目" : "添加项目";
   const submitLabel = draft.id ? "保存" : "添加";
   const isFormDisabled = isSubmitting || isInspectingProject;
+  const shouldShowResolvedPathCard = isEditing || (Boolean(watchedPath) && !isInspectingProject);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -378,6 +387,7 @@ export function ProjectFormDialog({
             onSubmit={form.handleSubmit((values) =>
               onSubmit({
                 ...values,
+                groupId: values.groupId || null,
                 id: draft.id,
               } as ProjectDraft)
             )}
@@ -396,7 +406,7 @@ export function ProjectFormDialog({
 
                 <div className="space-y-2">
                   <FieldLabel label="项目目录" required />
-                  {isEditing ? (
+                  {shouldShowResolvedPathCard ? (
                     <div className="rounded-lg border border-border/30 bg-black/10 p-4">
                       <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0 flex-1">
@@ -444,6 +454,48 @@ export function ProjectFormDialog({
                 ) : null}
 
                 <div className="grid gap-4 md:grid-cols-2">
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <FieldLabel label="所属分组" />
+                      <button
+                        type="button"
+                        className="shrink-0 text-primary transition-colors hover:text-primary/80 disabled:cursor-not-allowed disabled:opacity-40"
+                        onClick={onOpenCreateGroup}
+                        disabled={isFormDisabled}
+                      >
+                        <Plus className="size-5 stroke-[2.75]" />
+                      </button>
+                    </div>
+                    <div>
+                      <Controller
+                        control={form.control}
+                        name="groupId"
+                        defaultValue={draft.groupId}
+                        render={({ field }) => (
+                          <Select
+                            value={field.value ?? "__ungrouped__"}
+                            onValueChange={(value) =>
+                              field.onChange(value === "__ungrouped__" ? null : value)
+                            }
+                            disabled={isFormDisabled}
+                          >
+                            <SelectTrigger className="flex-1">
+                              <SelectValue placeholder="请选择分组" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="__ungrouped__">未分组</SelectItem>
+                              {projectGroups.map((group) => (
+                                <SelectItem key={group.id} value={group.id}>
+                                  {group.name}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        )}
+                      />
+                    </div>
+                  </div>
+
                   <div className="space-y-2">
                     <FieldLabel htmlFor="project-name" label="项目名称" required />
                     <Input

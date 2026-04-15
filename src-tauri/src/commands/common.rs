@@ -6,8 +6,8 @@ use tauri::State;
 use crate::{
     contracts::{
         normalize_node_version, AppStartupSettings, BackendErrorCode, DesktopEnvironment,
-        NodeManagerKind, ProjectConfig, ProjectDiagnosis, ProjectPanelSnapshot, ProjectReadiness,
-        ProjectStartPreflight,
+        NodeManagerKind, ProjectConfig, ProjectDiagnosis, ProjectGroup, ProjectPanelSnapshot,
+        ProjectReadiness, ProjectStartPreflight,
     },
     lock_error,
     node_manager::{
@@ -186,7 +186,13 @@ pub fn does_node_version_satisfy_requirement(node_version: &str, requirement: &s
     match VersionReq::parse(&normalized_requirement) {
         Ok(version_req) => version_req.matches(&parsed_version),
         Err(_) => major_from_node_requirement(&normalized_requirement)
-            .map(|major| normalized_node_version.split('.').next().unwrap_or_default() == major)
+            .map(|major| {
+                normalized_node_version
+                    .split('.')
+                    .next()
+                    .unwrap_or_default()
+                    == major
+            })
             .unwrap_or(false),
     }
 }
@@ -457,7 +463,9 @@ fn build_start_preflight_after_node_check(
         );
     }
 
-    if let Err(error) = ensure_package_manager_available(project.package_manager, &selected_node_version) {
+    if let Err(error) =
+        ensure_package_manager_available(project.package_manager, &selected_node_version)
+    {
         return build_start_preflight_result(
             false,
             missing_dependencies,
@@ -470,7 +478,9 @@ fn build_start_preflight_after_node_check(
         );
     }
 
-    if let Err(error) = ensure_start_command_available(&project.start_command, &selected_node_version) {
+    if let Err(error) =
+        ensure_start_command_available(&project.start_command, &selected_node_version)
+    {
         return build_start_preflight_result(
             false,
             missing_dependencies,
@@ -543,11 +553,13 @@ pub fn build_desktop_environment() -> Result<DesktopEnvironment, String> {
 
 pub fn build_project_panel_snapshot(
     projects: Vec<ProjectConfig>,
+    project_groups: Vec<ProjectGroup>,
     startup_settings: AppStartupSettings,
     runtimes: Vec<crate::contracts::ProjectRuntime>,
 ) -> Result<ProjectPanelSnapshot, String> {
     Ok(ProjectPanelSnapshot {
         projects,
+        project_groups,
         runtimes,
         environment: build_desktop_environment()?,
         startup_settings,
@@ -580,13 +592,12 @@ mod tests {
         };
 
         let temp_dir = create_temp_project_dir("custom-start-command");
-        write_package_json(&temp_dir, r#"{ "name": "custom-start", "version": "1.0.0" }"#);
-
-        let project = build_project(
+        write_package_json(
             &temp_dir,
-            &node_version,
-            r#"node -e "console.log('ok')""#,
+            r#"{ "name": "custom-start", "version": "1.0.0" }"#,
         );
+
+        let project = build_project(&temp_dir, &node_version, r#"node -e "console.log('ok')""#);
 
         let assessment = assess_project_start(&project);
         let diagnosis = build_project_diagnosis(project);
@@ -689,6 +700,7 @@ mod tests {
             id: "test-project".to_string(),
             name: "Test Project".to_string(),
             path: path.to_string_lossy().to_string(),
+            group_id: None,
             node_version: node_version.to_string(),
             package_manager: ProjectPackageManager::Npm,
             start_command: start_command.to_string(),

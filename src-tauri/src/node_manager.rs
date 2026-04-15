@@ -1,7 +1,6 @@
 use std::{
     collections::HashSet,
-    env,
-    fs,
+    env, fs,
     path::{Path, PathBuf},
     process::Command as StdCommand,
     sync::{Mutex, OnceLock},
@@ -76,7 +75,10 @@ pub fn resolve_node_manager_version() -> Option<String> {
     }
 
     let fnm_executable = resolve_fnm_executable()?;
-    let output = StdCommand::new(fnm_executable).arg("--version").output().ok()?;
+    let output = StdCommand::new(fnm_executable)
+        .arg("--version")
+        .output()
+        .ok()?;
     if !output.status.success() {
         return None;
     }
@@ -327,8 +329,8 @@ pub fn resolve_fnm_executable() -> Option<PathBuf> {
         return Some(path);
     }
 
-    let resolved =
-        resolve_executable_from_path("fnm").or_else(resolve_fnm_executable_from_common_locations)?;
+    let resolved = resolve_executable_from_path("fnm")
+        .or_else(resolve_fnm_executable_from_common_locations)?;
 
     node_manager_cache()
         .lock()
@@ -369,7 +371,10 @@ fn parse_installed_versions(output: &str) -> Vec<String> {
 }
 
 fn resolve_executable_from_path(command_name: &str) -> Option<PathBuf> {
-    let output = StdCommand::new("where.exe").arg(command_name).output().ok()?;
+    let output = StdCommand::new("where.exe")
+        .arg(command_name)
+        .output()
+        .ok()?;
     if !output.status.success() {
         return None;
     }
@@ -449,12 +454,22 @@ fn resolve_nvm_executable_from_common_locations() -> Option<PathBuf> {
     }
 
     if let Some(home_dir) = dirs::home_dir() {
-        dedupe_push(&mut candidates, home_dir.join("AppData").join("Roaming").join("nvm").join("nvm.exe"));
+        dedupe_push(
+            &mut candidates,
+            home_dir
+                .join("AppData")
+                .join("Roaming")
+                .join("nvm")
+                .join("nvm.exe"),
+        );
         dedupe_push(&mut candidates, home_dir.join("nvm").join("nvm.exe"));
     }
 
     if let Some(program_files) = env::var_os("ProgramFiles") {
-        dedupe_push(&mut candidates, Path::new(&program_files).join("nvm").join("nvm.exe"));
+        dedupe_push(
+            &mut candidates,
+            Path::new(&program_files).join("nvm").join("nvm.exe"),
+        );
     }
 
     if let Some(program_files_x86) = env::var_os("ProgramFiles(x86)") {
@@ -468,7 +483,10 @@ fn resolve_nvm_executable_from_common_locations() -> Option<PathBuf> {
 }
 
 fn resolve_winget_package_candidates(local_app_data: &Path) -> Vec<PathBuf> {
-    let packages_directory = local_app_data.join("Microsoft").join("WinGet").join("Packages");
+    let packages_directory = local_app_data
+        .join("Microsoft")
+        .join("WinGet")
+        .join("Packages");
     let Ok(entries) = fs::read_dir(packages_directory) else {
         return Vec::new();
     };
@@ -591,12 +609,16 @@ fn non_empty_output(bytes: &[u8]) -> Option<String> {
     (!value.is_empty()).then_some(value)
 }
 
-fn build_install_success_message(installer: &Installer<'_>, output: &std::process::Output) -> String {
+fn build_install_success_message(
+    installer: &Installer<'_>,
+    output: &std::process::Output,
+) -> String {
     if output.status.success() {
         return format!("fnm 已通过 {} 安装完成。", installer.label);
     }
 
-    if installer.label == "winget" && output.status.code() == Some(WINGET_NO_APPLICABLE_UPGRADE_EXIT_CODE)
+    if installer.label == "winget"
+        && output.status.code() == Some(WINGET_NO_APPLICABLE_UPGRADE_EXIT_CODE)
     {
         return "系统里已经有 fnm 了，这次直接复用了现有安装。".to_string();
     }

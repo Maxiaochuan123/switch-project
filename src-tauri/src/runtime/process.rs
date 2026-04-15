@@ -30,7 +30,10 @@ pub(super) async fn wait_for_exit(app: AppHandle, project_id: String, mut child:
     let message = if exit_code == Some(0) || exit_code.is_none() {
         Some("进程已结束。".to_string())
     } else {
-        Some(format!("进程异常退出，退出码 {}。", exit_code.unwrap_or(-1)))
+        Some(format!(
+            "进程异常退出，退出码 {}。",
+            exit_code.unwrap_or(-1)
+        ))
     };
 
     state.runtime_manager.finish_runtime(

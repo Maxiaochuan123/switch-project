@@ -126,7 +126,10 @@ pub(crate) fn ensure_package_manager_available(
     package_manager: ProjectPackageManager,
     node_version: &str,
 ) -> Result<(), String> {
-    if is_command_available(package_manager_command_name(package_manager), Some(node_version))? {
+    if is_command_available(
+        package_manager_command_name(package_manager),
+        Some(node_version),
+    )? {
         return Ok(());
     }
 
@@ -198,14 +201,13 @@ pub(super) fn is_command_available(
         node_version,
         None,
     )?
-        .output()
-        .map_err(|error| format!("检查命令失败: {error}"))?;
+    .output()
+    .map_err(|error| format!("检查命令失败: {error}"))?;
 
-    let is_available =
-        output.status.success()
-            && String::from_utf8_lossy(&output.stdout)
-                .lines()
-                .any(|line| !line.trim().is_empty());
+    let is_available = output.status.success()
+        && String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .any(|line| !line.trim().is_empty());
 
     command_resolution_cache()
         .lock()
@@ -238,8 +240,8 @@ pub(super) fn resolve_global_command_path(
         node_version,
         None,
     )?
-        .output()
-        .map_err(|error| format!("查找命令失败: {error}"))?;
+    .output()
+    .map_err(|error| format!("查找命令失败: {error}"))?;
 
     if !output.status.success() {
         command_resolution_cache()
@@ -321,19 +323,11 @@ fn extract_command_name(command: &str) -> String {
     }
 
     if let Some(stripped) = trimmed.strip_prefix('"') {
-        return stripped
-            .split('"')
-            .next()
-            .unwrap_or_default()
-            .to_string();
+        return stripped.split('"').next().unwrap_or_default().to_string();
     }
 
     if let Some(stripped) = trimmed.strip_prefix('\'') {
-        return stripped
-            .split('\'')
-            .next()
-            .unwrap_or_default()
-            .to_string();
+        return stripped.split('\'').next().unwrap_or_default().to_string();
     }
 
     trimmed

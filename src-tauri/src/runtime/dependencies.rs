@@ -252,7 +252,10 @@ pub(super) async fn install_project_dependencies_if_missing(
         Some(&project.node_version),
         Some(project_path),
     )?;
-    command.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    command
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
 
     let output = command
         .output()
@@ -287,7 +290,10 @@ pub(super) async fn install_project_dependencies_if_missing_with_logs(
         Some(&project.node_version),
         Some(project_path),
     )?;
-    command.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    command
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
 
     let output = command
         .output()
@@ -296,11 +302,19 @@ pub(super) async fn install_project_dependencies_if_missing_with_logs(
     let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
     let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
 
-    for line in stdout.lines().map(str::trim).filter(|line| !line.is_empty()) {
+    for line in stdout
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+    {
         runtime_manager.consume_output(app, &project.id, ProjectLogLevel::Stdout, line.to_string());
     }
 
-    for line in stderr.lines().map(str::trim).filter(|line| !line.is_empty()) {
+    for line in stderr
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+    {
         runtime_manager.consume_output(app, &project.id, ProjectLogLevel::Stderr, line.to_string());
     }
 
@@ -339,14 +353,19 @@ async fn ensure_rimraf_available() -> Result<String, String> {
         installer_node_version.as_deref(),
         None,
     )?;
-    command.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::piped());
+    command
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped());
 
     let output = command
         .output()
         .map_err(|error| format!("安装 rimraf 失败: {error}"))?;
 
     if output.status.success() {
-        if let Some(command_path) = resolve_global_command_path("rimraf", installer_node_version.as_deref())? {
+        if let Some(command_path) =
+            resolve_global_command_path("rimraf", installer_node_version.as_deref())?
+        {
             return Ok(command_path);
         }
     }

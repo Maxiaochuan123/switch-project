@@ -70,7 +70,7 @@ export function useProjectUtilityActions({
       async () => {
         const filePath = await open({
           multiple: false,
-          filters: [{ name: "JSON", extensions: ["json"] }],
+          filters: [{ name: "备份文件", extensions: ["json"] }],
         });
 
         if (typeof filePath !== "string") {
@@ -82,8 +82,8 @@ export function useProjectUtilityActions({
 
         toast.success(
           getToastContent(
-            "项目配置已导入",
-            `新增 ${result.added} 个，更新 ${result.updated} 个，跳过 ${result.skipped} 个。`
+            "备份恢复完成",
+            `新增 ${result.added} 个项目，更新 ${result.updated} 个项目，跳过 ${result.skipped} 个项目。`
           )
         );
       },
@@ -96,8 +96,8 @@ export function useProjectUtilityActions({
       "export-projects",
       async () => {
         const filePath = await save({
-          defaultPath: "switch-project-projects.json",
-          filters: [{ name: "JSON", extensions: ["json"] }],
+          defaultPath: "switch-project-backup.json",
+          filters: [{ name: "备份文件", extensions: ["json"] }],
         });
 
         if (typeof filePath !== "string") {
@@ -105,7 +105,9 @@ export function useProjectUtilityActions({
         }
 
         await desktopApi.exportProjects(filePath);
-        toast.success(getToastContent("项目配置已导出", "项目列表已经导出到所选文件。"));
+        toast.success(
+          getToastContent("备份已创建", "当前项目和分组已经保存到所选备份文件。")
+        );
       },
       400
     );

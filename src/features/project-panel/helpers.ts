@@ -282,6 +282,7 @@ export function areProjectConfigsEqual(left?: ProjectConfig, right?: ProjectConf
     left.id === right.id &&
     left.name === right.name &&
     left.path === right.path &&
+    left.groupId === right.groupId &&
     left.nodeVersion === right.nodeVersion &&
     left.packageManager === right.packageManager &&
     left.startCommand === right.startCommand &&

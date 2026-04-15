@@ -4,6 +4,7 @@ import type {
   DesktopEnvironment,
   ProjectConfig,
   ProjectDirectoryInspection,
+  ProjectGroup,
   ProjectPackageManager,
 } from "@/shared/contracts";
 import {
@@ -22,11 +23,13 @@ import { getErrorMessage } from "./helpers";
 
 type UseProjectFormStateOptions = {
   environment: DesktopEnvironment;
+  projectGroups: ProjectGroup[];
   onFormError: (message: string | null) => void;
 };
 
 export function useProjectFormState({
   environment,
+  projectGroups,
   onFormError,
 }: UseProjectFormStateOptions) {
   const [isProjectDialogOpen, setIsProjectDialogOpen] = useState(false);
@@ -301,9 +304,12 @@ export function useProjectFormState({
     [resetFormState]
   );
 
-  const openCreateDialog = useCallback(() => {
+  const openCreateDialog = useCallback((groupId: string | null = null) => {
     resetFormState();
-    setProjectDraft(createEmptyProjectDraft());
+    setProjectDraft({
+      ...createEmptyProjectDraft(),
+      groupId,
+    });
     setShouldInspectPath(true);
     setIsProjectDialogOpen(true);
   }, [resetFormState]);
@@ -315,6 +321,7 @@ export function useProjectFormState({
         id: project.id,
         name: project.name,
         path: project.path,
+        groupId: project.groupId ?? null,
         nodeVersion: project.nodeVersion,
         packageManager: project.packageManager,
         startCommand: project.startCommand,
@@ -340,6 +347,7 @@ export function useProjectFormState({
     openEditDialog,
     pathInspection,
     projectDraft,
+    projectGroups,
     setProjectDraft,
   };
 }

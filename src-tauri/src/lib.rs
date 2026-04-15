@@ -11,8 +11,8 @@ pub use contracts::export_typescript_contracts;
 use std::{
     collections::HashMap,
     sync::{
-    atomic::{AtomicBool, Ordering},
-    Mutex,
+        atomic::{AtomicBool, Ordering},
+        Mutex,
     },
 };
 
@@ -92,7 +92,12 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::projects::list_projects,
+            commands::projects::list_project_groups,
             commands::projects::get_project_panel_snapshot,
+            commands::projects::create_project_group,
+            commands::projects::update_project_group,
+            commands::projects::delete_project_group,
+            commands::projects::reorder_project_groups,
             commands::projects::save_project,
             commands::projects::delete_project,
             commands::runtime::list_runtimes,
@@ -132,7 +137,9 @@ pub fn run() {
 fn setup_tray(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let show_item = MenuItemBuilder::with_id("show", "显示面板").build(app)?;
     let quit_item = MenuItemBuilder::with_id("quit", "退出软件").build(app)?;
-    let menu = MenuBuilder::new(app).items(&[&show_item, &quit_item]).build()?;
+    let menu = MenuBuilder::new(app)
+        .items(&[&show_item, &quit_item])
+        .build()?;
 
     let icon = app.default_window_icon().cloned();
     let mut tray_builder = TrayIconBuilder::new()
@@ -256,10 +263,12 @@ async fn run_project_autostart(app: AppHandle) {
         }
 
         let state = app.state::<ManagedState>();
-        let _ = state.runtime_manager.start_project(&app, project, None).await;
+        let _ = state
+            .runtime_manager
+            .start_project(&app, project, None)
+            .await;
     }
 }
-
 
 pub(crate) fn lock_error<T>(_: std::sync::PoisonError<T>) -> String {
     "应用内部状态异常，请重试。".to_string()

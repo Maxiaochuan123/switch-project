@@ -1,14 +1,15 @@
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
+  ArrowRightLeft,
   CheckCircle2,
   Copy,
+  EllipsisVertical,
   ExternalLink,
   LoaderCircle,
   Pencil,
   Play,
   RefreshCw,
-  Settings2,
   Square,
   TerminalSquare,
   Trash2,
@@ -32,6 +33,7 @@ import type {
   OperationEvent,
   ProjectConfig,
   ProjectDiagnosis,
+  ProjectGroup,
   ProjectRuntime,
 } from "@/shared/contracts";
 
@@ -53,6 +55,9 @@ type ProjectCardProps = {
   isTerminalLocked: boolean;
   isDirectoryLocked: boolean;
   isAddressLocked: boolean;
+  isMoveGroupLocked: boolean;
+  groupBadgeLabel?: string | null;
+  availableGroups: Pick<ProjectGroup, "id" | "name">[];
   onEdit: () => void;
   onDelete: () => void;
   onDeleteNodeModules: () => void;
@@ -62,9 +67,17 @@ type ProjectCardProps = {
   onStop: () => void;
   onOpenDirectory: () => void;
   onOpenUrl: (url: string) => void;
+  onOpenMoveGroupDialog: () => void;
 };
 
 function areProjectCardPropsEqual(left: ProjectCardProps, right: ProjectCardProps) {
+  const sameAvailableGroups =
+    left.availableGroups.length === right.availableGroups.length &&
+    left.availableGroups.every((group, index) => {
+      const rightGroup = right.availableGroups[index];
+      return rightGroup && group.id === rightGroup.id && group.name === rightGroup.name;
+    });
+
   return (
     areProjectConfigsEqual(left.project, right.project) &&
     areProjectRuntimesEqual(left.runtime, right.runtime) &&
@@ -82,7 +95,10 @@ function areProjectCardPropsEqual(left: ProjectCardProps, right: ProjectCardProp
     left.isReinstallNodeModulesLocked === right.isReinstallNodeModulesLocked &&
     left.isTerminalLocked === right.isTerminalLocked &&
     left.isDirectoryLocked === right.isDirectoryLocked &&
-    left.isAddressLocked === right.isAddressLocked
+    left.isAddressLocked === right.isAddressLocked &&
+    left.isMoveGroupLocked === right.isMoveGroupLocked &&
+    left.groupBadgeLabel === right.groupBadgeLabel &&
+    sameAvailableGroups
   );
 }
 
@@ -189,6 +205,9 @@ export const ProjectCard = memo(function ProjectCard({
   isTerminalLocked,
   isDirectoryLocked,
   isAddressLocked,
+  isMoveGroupLocked,
+  groupBadgeLabel,
+  availableGroups,
   onDelete,
   onDeleteNodeModules,
   onEdit,
@@ -198,6 +217,7 @@ export const ProjectCard = memo(function ProjectCard({
   onReinstallNodeModules,
   onStart,
   onStop,
+  onOpenMoveGroupDialog,
 }: ProjectCardProps) {
   const status = runtime?.status ?? "stopped";
   const isRunning = status === "running";
@@ -268,6 +288,11 @@ export const ProjectCard = memo(function ProjectCard({
     onReinstallNodeModules();
   }
 
+  function handleOpenMoveGroupDialog() {
+    setMenuOpen(false);
+    onOpenMoveGroupDialog();
+  }
+
   const operationTone =
     panelState.kind === "operation" ? getOperationTone(panelState.event.status) : null;
   const diagnosisTone =
@@ -310,6 +335,14 @@ export const ProjectCard = memo(function ProjectCard({
               </TooltipTrigger>
               <TooltipContent sideOffset={8}>打开项目目录</TooltipContent>
             </Tooltip>
+            {groupBadgeLabel ? (
+              <Badge
+                variant="outline"
+                className="max-w-[7rem] truncate border-primary/30 bg-primary/12 px-2 py-0 text-[10px] text-primary"
+              >
+                {groupBadgeLabel}
+              </Badge>
+            ) : null}
           </div>
 
           <div className="flex items-center gap-1.5">
@@ -339,22 +372,22 @@ export const ProjectCard = memo(function ProjectCard({
               </Badge>
             )}
 
-            <div ref={menuRef} className="relative">
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    className="size-6 text-muted-foreground hover:text-foreground"
-                    onClick={handleToggleMenu}
-                    disabled={menuToggleLocked}
-                  >
-                    <Settings2 className="size-4" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent sideOffset={8}>更多操作</TooltipContent>
-              </Tooltip>
+            <div
+              ref={menuRef}
+              className="relative"
+              onMouseEnter={() => setMenuOpen(true)}
+              onMouseLeave={() => setMenuOpen(false)}
+            >
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="size-6 text-muted-foreground hover:text-foreground"
+                onClick={handleToggleMenu}
+                disabled={menuToggleLocked}
+              >
+                <EllipsisVertical className="size-4" />
+              </Button>
 
               {menuOpen ? (
                 <div className="absolute right-0 top-7 z-20 min-w-40 rounded-lg border border-border/80 bg-black/60 p-1.5 shadow-[0_8px_40px_rgba(0,0,0,0.8)] backdrop-blur-xl">
@@ -370,15 +403,11 @@ export const ProjectCard = memo(function ProjectCard({
                   <button
                     type="button"
                     className="flex w-full items-center gap-2.5 whitespace-nowrap rounded-lg px-3 py-2 text-left text-sm text-foreground transition-colors hover:bg-white/8 disabled:opacity-50"
-                    onClick={handleDeleteDependencies}
-                    disabled={isBusy || isDeleteNodeModulesLocked}
+                    onClick={handleOpenMoveGroupDialog}
+                    disabled={isMoveGroupLocked || availableGroups.length === 0}
                   >
-                    {isDeleteNodeModulesLocked ? (
-                      <LoaderCircle className="size-4 animate-spin" />
-                    ) : (
-                      <Trash2 className="size-4" />
-                    )}
-                    删除依赖
+                    <ArrowRightLeft className="size-4" />
+                    切换分组
                   </button>
                   <button
                     type="button"
@@ -395,6 +424,20 @@ export const ProjectCard = memo(function ProjectCard({
                   </button>
                   <button
                     type="button"
+                    className="flex w-full items-center gap-2.5 whitespace-nowrap rounded-lg px-3 py-2 text-left text-sm text-foreground transition-colors hover:bg-white/8 disabled:opacity-50"
+                    onClick={handleDeleteDependencies}
+                    disabled={isBusy || isDeleteNodeModulesLocked}
+                  >
+                    {isDeleteNodeModulesLocked ? (
+                      <LoaderCircle className="size-4 animate-spin" />
+                    ) : (
+                      <Trash2 className="size-4" />
+                    )}
+                    删除依赖
+                  </button>
+                  <div className="my-1 h-px bg-white/8" />
+                  <button
+                    type="button"
                     className="flex w-full items-center gap-2.5 whitespace-nowrap rounded-lg px-3 py-2 text-left text-sm text-rose-100 transition-colors hover:bg-rose-500/10 disabled:opacity-50"
                     onClick={handleDelete}
                     disabled={isBusy || isDeleteLocked}
@@ -409,7 +452,7 @@ export const ProjectCard = memo(function ProjectCard({
         </div>
       </div>
 
-      <div className="px-3.5 py-1">
+      <div className="px-3.5">
         <div className="flex h-[9.8rem] items-center overflow-hidden rounded-lg bg-black/80 shadow-[inset_0_2px_10px_rgba(0,0,0,0.5)] border border-white/5 transition-colors">
           {panelState.kind === "operation" && operationTone ? (
             <div
@@ -500,7 +543,7 @@ export const ProjectCard = memo(function ProjectCard({
               </div>
             </div>
           ) : panelState.kind === "addresses" ? (
-            <div className="flex h-full w-full items-center justify-center">
+            <div className="flex h-full w-full items-center justify-center px-3">
               <div className="w-full max-w-[22rem] space-y-2">
                 {panelState.addresses.map((address) => (
                   <div 

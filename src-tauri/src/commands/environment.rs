@@ -5,13 +5,11 @@ use crate::{
     contracts::{AppStartupSettings, DesktopEnvironment, NodeManagerInstallResult},
     lock_error,
     node_manager::{
-        clear_node_manager_cache,
-        install_node_manager as install_node_manager_impl,
+        clear_node_manager_cache, install_node_manager as install_node_manager_impl,
         install_node_version as install_node_version_impl,
     },
     runtime::{
-        clear_command_resolution_cache,
-        open_project_terminal as open_project_terminal_window,
+        clear_command_resolution_cache, open_project_terminal as open_project_terminal_window,
     },
     ManagedState,
 };

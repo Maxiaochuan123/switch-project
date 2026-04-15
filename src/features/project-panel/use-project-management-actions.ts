@@ -20,6 +20,7 @@ type UseProjectManagementActionsOptions = {
   setFeedback: Dispatch<SetStateAction<Feedback | null>>;
   setFormError: Dispatch<SetStateAction<string | null>>;
   setTerminalTarget: Dispatch<SetStateAction<ProjectConfig | null>>;
+  syncProjects: (projects: ProjectConfig[]) => void;
   terminalTargetId?: string;
 };
 
@@ -35,11 +36,15 @@ export function useProjectManagementActions({
   setFeedback,
   setFormError,
   setTerminalTarget,
+  syncProjects,
   terminalTargetId,
 }: UseProjectManagementActionsOptions) {
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const normalizeProjectPath = useCallback((projectPath: string) => projectPath.trim().toLowerCase(), []);
+  const normalizeProjectPath = useCallback(
+    (projectPath: string) => projectPath.trim().toLowerCase(),
+    []
+  );
 
   const handleSaveProject = useCallback(
     async (nextDraft: ProjectDraft) => {
@@ -48,6 +53,7 @@ export function useProjectManagementActions({
         id: nextDraft.id,
         name: nextDraft.name.trim(),
         path: nextDraft.path.trim(),
+        groupId: nextDraft.groupId,
         nodeVersion: nextDraft.nodeVersion.trim(),
         packageManager: nextDraft.packageManager,
         startCommand: nextDraft.startCommand.trim(),
@@ -94,6 +100,7 @@ export function useProjectManagementActions({
           id: draft.id ?? crypto.randomUUID(),
           name: draft.name,
           path: draft.path,
+          groupId: draft.groupId,
           nodeVersion: draft.nodeVersion,
           packageManager: draft.packageManager as ProjectPackageManager,
           startCommand: draft.startCommand,
@@ -130,17 +137,20 @@ export function useProjectManagementActions({
       return;
     }
 
+    const deletingProject = deleteTarget;
+
     setIsSubmitting(true);
+    setDeleteTarget(null);
+    syncProjects(projects.filter((project) => project.id !== deletingProject.id));
+    if (terminalTargetId === deletingProject.id) {
+      setTerminalTarget(null);
+    }
 
     try {
-      await desktopApi.deleteProject(deleteTarget.id);
+      await desktopApi.deleteProject(deletingProject.id);
       await loadProjectData();
-      setDeleteTarget(null);
-
-      if (terminalTargetId === deleteTarget.id) {
-        setTerminalTarget(null);
-      }
     } catch (error) {
+      await loadProjectData();
       setFeedback({
         variant: "destructive",
         title: "移除项目失败",
@@ -152,14 +162,77 @@ export function useProjectManagementActions({
   }, [
     deleteTarget,
     loadProjectData,
+    projects,
     setDeleteTarget,
     setFeedback,
     setTerminalTarget,
+    syncProjects,
     terminalTargetId,
   ]);
 
+  const handleMoveProjectToGroup = useCallback(
+    async (project: ProjectConfig, groupId: string | null) => {
+      try {
+        await desktopApi.saveProject({
+          ...project,
+          groupId,
+        });
+        await loadProjectData();
+        return true;
+      } catch (error) {
+        setFeedback({
+          variant: "destructive",
+          title: "切换分组失败",
+          message: getErrorMessage(error),
+        });
+        return false;
+      }
+    },
+    [loadProjectData, setFeedback]
+  );
+
+  const handleAssignProjectsToGroup = useCallback(
+    async (targetGroupId: string, targetProjects: ProjectConfig[]) => {
+      if (targetProjects.length === 0) {
+        return true;
+      }
+
+      setIsSubmitting(true);
+
+      try {
+        for (const project of targetProjects) {
+          await desktopApi.saveProject({
+            ...project,
+            groupId: targetGroupId,
+          });
+        }
+
+        await loadProjectData();
+        return true;
+      } catch (error) {
+        try {
+          await loadProjectData();
+        } catch {
+          // Keep the original assignment error as the main feedback.
+        }
+
+        setFeedback({
+          variant: "destructive",
+          title: "批量加入分组失败",
+          message: getErrorMessage(error),
+        });
+        return false;
+      } finally {
+        setIsSubmitting(false);
+      }
+    },
+    [loadProjectData, setFeedback]
+  );
+
   return {
+    handleAssignProjectsToGroup,
     handleDeleteProject,
+    handleMoveProjectToGroup,
     handleSaveProject,
     isSubmitting,
   };

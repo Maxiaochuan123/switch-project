@@ -12,6 +12,7 @@ import type {
   AppStartupSettings,
   DesktopEnvironment,
   ProjectConfig,
+  ProjectGroup,
   ProjectRuntime,
 } from "@/shared/contracts";
 
@@ -54,6 +55,7 @@ type UseProjectBootstrapOptions = {
   setAppCloseRequest: Dispatch<SetStateAction<AppCloseRequest | null>>;
   setEnvironment: Dispatch<SetStateAction<DesktopEnvironment>>;
   setFeedback: Dispatch<SetStateAction<Feedback | null>>;
+  setProjectGroups: Dispatch<SetStateAction<ProjectGroup[]>>;
   setStartupSettings: Dispatch<SetStateAction<AppStartupSettings>>;
   setStartupSettingsDraft: Dispatch<SetStateAction<AppStartupSettings>>;
   syncProjects: (projects: ProjectConfig[]) => void;
@@ -64,6 +66,7 @@ export function useProjectBootstrap({
   setAppCloseRequest,
   setEnvironment,
   setFeedback,
+  setProjectGroups,
   setStartupSettings,
   setStartupSettingsDraft,
   syncProjects,
@@ -80,6 +83,7 @@ export function useProjectBootstrap({
       setLoadingProjectCount(nextProjectCount);
       persistProjectCount(nextProjectCount);
       syncProjects(snapshot.projects);
+      setProjectGroups(snapshot.projectGroups);
       syncRuntimes(snapshot.runtimes);
       setEnvironment((current) =>
         areDesktopEnvironmentsEqual(current, snapshot.environment)
@@ -101,6 +105,7 @@ export function useProjectBootstrap({
       setEnvironment,
       setStartupSettings,
       setStartupSettingsDraft,
+      setProjectGroups,
       syncProjects,
       syncRuntimes,
     ]

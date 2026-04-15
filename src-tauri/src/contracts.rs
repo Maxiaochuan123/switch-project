@@ -40,6 +40,8 @@ pub struct ProjectConfig {
     pub id: String,
     pub name: String,
     pub path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub group_id: Option<String>,
     pub node_version: String,
     #[serde(default = "default_project_package_manager")]
     pub package_manager: ProjectPackageManager,
@@ -48,6 +50,14 @@ pub struct ProjectConfig {
     pub auto_start_on_app_launch: bool,
     #[serde(default)]
     pub auto_open_local_url_on_start: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectGroup {
+    pub id: String,
+    pub name: String,
+    pub order: u32,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
@@ -246,6 +256,7 @@ pub struct ProjectDiagnosis {
 #[serde(rename_all = "camelCase")]
 pub struct ProjectPanelSnapshot {
     pub projects: Vec<ProjectConfig>,
+    pub project_groups: Vec<ProjectGroup>,
     pub runtimes: Vec<ProjectRuntime>,
     pub environment: DesktopEnvironment,
     pub startup_settings: AppStartupSettings,
@@ -347,6 +358,15 @@ pub struct ImportProjectsResult {
     pub skipped: usize,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectGroupsExport {
+    #[serde(default)]
+    pub project_groups: Vec<ProjectGroup>,
+    #[serde(default)]
+    pub projects: Vec<ProjectConfig>,
+}
+
 pub fn normalize_node_version(value: &str) -> String {
     value.trim().trim_start_matches(['v', 'V']).to_string()
 }
@@ -409,6 +429,7 @@ fn build_typescript_contracts() -> String {
     push_typescript_declaration::<ProjectStatus>(&mut sections, &config);
     push_typescript_declaration::<ProjectPackageManager>(&mut sections, &config);
     push_typescript_declaration::<ProjectConfig>(&mut sections, &config);
+    push_typescript_declaration::<ProjectGroup>(&mut sections, &config);
     push_typescript_declaration::<ProjectAddressKind>(&mut sections, &config);
     push_typescript_declaration::<ProjectAddress>(&mut sections, &config);
     push_typescript_declaration::<ProjectLogLevel>(&mut sections, &config);
@@ -425,6 +446,7 @@ fn build_typescript_contracts() -> String {
     push_typescript_declaration::<ProjectDiagnosis>(&mut sections, &config);
     push_typescript_declaration::<AppStartupSettings>(&mut sections, &config);
     push_typescript_declaration::<ProjectPanelSnapshot>(&mut sections, &config);
+    push_typescript_declaration::<ProjectGroupsExport>(&mut sections, &config);
     push_typescript_declaration::<ProjectStartPreflight>(&mut sections, &config);
     push_typescript_declaration::<AppCloseRequest>(&mut sections, &config);
     push_typescript_declaration::<DependencyOperation>(&mut sections, &config);

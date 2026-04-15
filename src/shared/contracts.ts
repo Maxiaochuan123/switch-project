@@ -8,6 +8,7 @@ import type {
   ProjectConfig,
   ProjectDiagnosis,
   ProjectDirectoryInspection,
+  ProjectGroup,
   ProjectPackageManager,
   ProjectPanelSnapshot,
   ProjectRuntime,
@@ -46,6 +47,11 @@ export function normalizeAppStartupSettings(
 
 export type DesktopApi = {
   listProjects: () => Promise<ProjectConfig[]>;
+  listProjectGroups: () => Promise<ProjectGroup[]>;
+  createProjectGroup: (name: string) => Promise<ProjectGroup>;
+  updateProjectGroup: (group: ProjectGroup) => Promise<ProjectGroup>;
+  deleteProjectGroup: (groupId: string) => Promise<void>;
+  reorderProjectGroups: (groupIds: string[]) => Promise<ProjectGroup[]>;
   saveProject: (project: ProjectConfig) => Promise<void>;
   deleteProject: (projectId: string) => Promise<void>;
   getProjectPanelSnapshot: () => Promise<ProjectPanelSnapshot>;

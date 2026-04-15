@@ -18,7 +18,11 @@ pub(super) fn translate_runtime_message(message: &str) -> String {
 }
 
 pub(super) fn extract_addresses_from_message(message: &str) -> Vec<NormalizedAddress> {
-    if message.trim().is_empty() || message.trim().eq_ignore_ascii_case("- Network: unavailable") {
+    if message.trim().is_empty()
+        || message
+            .trim()
+            .eq_ignore_ascii_case("- Network: unavailable")
+    {
         return Vec::new();
     }
 

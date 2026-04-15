@@ -48,7 +48,7 @@ pub fn delete_project_node_modules(
     let project = get_project(&state, &project_id)?;
 
     if state.runtime_manager.is_project_active(&project.id) {
-      return Err("项目正在运行中，请先停止后再删除依赖。".to_string());
+        return Err("项目正在运行中，请先停止后再删除依赖。".to_string());
     }
 
     state
@@ -71,7 +71,7 @@ pub fn reinstall_project_node_modules(
     let project = get_project(&state, &project_id)?;
 
     if state.runtime_manager.is_project_active(&project.id) {
-      return Err("项目正在运行中，请先停止后再重装依赖。".to_string());
+        return Err("项目正在运行中，请先停止后再重装依赖。".to_string());
     }
 
     state

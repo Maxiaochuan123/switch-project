@@ -4,6 +4,7 @@ import type {
   AppStartupSettings,
   NodeManagerInstallResult,
   ProjectConfig,
+  ProjectGroup,
 } from "@/shared/contracts";
 
 export type NodeInstallRequest = {
@@ -14,6 +15,11 @@ export type NodeInstallRequest = {
 export type NodeRetryRequest = {
   project: ProjectConfig;
   suggestedNodeVersion: string;
+};
+
+export type ProjectGroupDraft = {
+  id?: string;
+  name: string;
 };
 
 export type NodeInstallProgress = {
@@ -33,6 +39,9 @@ export function useProjectDialogState({ startupSettings }: UseProjectDialogState
     useState<AppStartupSettings>(startupSettings);
   const [deleteTarget, setDeleteTarget] = useState<ProjectConfig | null>(null);
   const [terminalTarget, setTerminalTarget] = useState<ProjectConfig | null>(null);
+  const [projectGroupDraft, setProjectGroupDraft] = useState<ProjectGroupDraft | null>(null);
+  const [deleteProjectGroupTarget, setDeleteProjectGroupTarget] =
+    useState<ProjectGroup | null>(null);
   const [nodeInstallRequest, setNodeInstallRequest] = useState<NodeInstallRequest | null>(null);
   const [nodeRetryTarget, setNodeRetryTarget] = useState<NodeRetryRequest | null>(null);
   const [nodeInstallProgress, setNodeInstallProgress] =
@@ -44,6 +53,7 @@ export function useProjectDialogState({ startupSettings }: UseProjectDialogState
   const [isInstallingNodeManager, setIsInstallingNodeManager] = useState(false);
   const [isNodeManagerInstallLogsOpen, setIsNodeManagerInstallLogsOpen] = useState(false);
   const [isInstallingNodeVersion, setIsInstallingNodeVersion] = useState(false);
+  const [isSubmittingProjectGroup, setIsSubmittingProjectGroup] = useState(false);
   const [isConfirmingAppClose, setIsConfirmingAppClose] = useState(false);
   const [isMinimizingAppClose, setIsMinimizingAppClose] = useState(false);
 
@@ -85,6 +95,18 @@ export function useProjectDialogState({ startupSettings }: UseProjectDialogState
     setIsNodeManagerInstallLogsOpen(nextOpen);
   }, []);
 
+  const handleProjectGroupDialogOpenChange = useCallback((nextOpen: boolean) => {
+    if (!nextOpen) {
+      setProjectGroupDraft(null);
+    }
+  }, []);
+
+  const handleDeleteProjectGroupDialogOpenChange = useCallback((nextOpen: boolean) => {
+    if (!nextOpen) {
+      setDeleteProjectGroupTarget(null);
+    }
+  }, []);
+
   const openStartupSettingsDialog = useCallback(() => {
     setStartupSettingsDraft(startupSettings);
     setIsStartupSettingsDialogOpen(true);
@@ -93,16 +115,20 @@ export function useProjectDialogState({ startupSettings }: UseProjectDialogState
   return {
     appCloseRequest,
     deleteTarget,
+    deleteProjectGroupTarget,
     handleDeleteDialogOpenChange,
+    handleDeleteProjectGroupDialogOpenChange,
     handleLogsDialogOpenChange,
     handleNodeManagerInstallLogsOpenChange,
     handleNodeInstallDialogOpenChange,
     handleNodeRetryDialogOpenChange,
     handleStartupSettingsOpenChange,
+    handleProjectGroupDialogOpenChange,
     isConfirmingAppClose,
     isInstallingNodeManager,
     isNodeManagerInstallLogsOpen,
     isInstallingNodeVersion,
+    isSubmittingProjectGroup,
     isMinimizingAppClose,
     isSavingStartupSettings,
     isStartupSettingsDialogOpen,
@@ -111,12 +137,15 @@ export function useProjectDialogState({ startupSettings }: UseProjectDialogState
     nodeManagerInstallResult,
     nodeRetryTarget,
     openStartupSettingsDialog,
+    projectGroupDraft,
     setAppCloseRequest,
     setDeleteTarget,
+    setDeleteProjectGroupTarget,
     setIsConfirmingAppClose,
     setIsInstallingNodeManager,
     setIsNodeManagerInstallLogsOpen,
     setIsInstallingNodeVersion,
+    setIsSubmittingProjectGroup,
     setIsMinimizingAppClose,
     setIsSavingStartupSettings,
     setIsStartupSettingsDialogOpen,
@@ -124,6 +153,7 @@ export function useProjectDialogState({ startupSettings }: UseProjectDialogState
     setNodeManagerInstallResult,
     setNodeInstallRequest,
     setNodeRetryTarget,
+    setProjectGroupDraft,
     setStartupSettingsDraft,
     setTerminalTarget,
     startupSettingsDraft,

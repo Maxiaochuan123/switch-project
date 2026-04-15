@@ -3,11 +3,11 @@ use std::collections::HashSet;
 use tauri::{AppHandle, State};
 
 use crate::{
-    lock_error,
     contracts::{
         ImportProjectsResult, ProjectConfig, ProjectDiagnosis, ProjectDirectoryInspection,
-        ProjectPanelSnapshot, ProjectStartPreflight,
+        ProjectGroup, ProjectPanelSnapshot, ProjectStartPreflight,
     },
+    lock_error,
     project_directory::inspect_project_directory as inspect_project_directory_impl,
     ManagedState,
 };
@@ -26,19 +26,81 @@ pub fn list_projects(state: State<ManagedState>) -> Result<Vec<ProjectConfig>, S
 pub fn get_project_panel_snapshot(
     state: State<ManagedState>,
 ) -> Result<ProjectPanelSnapshot, String> {
-    let (projects, startup_settings) = {
+    let (projects, project_groups, startup_settings) = {
         let store = state.store.lock().map_err(lock_error)?;
-        (store.list_projects(), store.get_app_startup_settings())
+        (
+            store.list_projects(),
+            store.list_project_groups(),
+            store.get_app_startup_settings(),
+        )
     };
     let runtimes = state.runtime_manager.list_runtimes();
 
-    build_project_panel_snapshot(projects, startup_settings, runtimes)
+    build_project_panel_snapshot(projects, project_groups, startup_settings, runtimes)
+}
+
+#[tauri::command]
+pub fn list_project_groups(state: State<ManagedState>) -> Result<Vec<ProjectGroup>, String> {
+    Ok(state
+        .store
+        .lock()
+        .map_err(lock_error)?
+        .list_project_groups())
+}
+
+#[tauri::command]
+pub fn create_project_group(
+    state: State<ManagedState>,
+    name: String,
+) -> Result<ProjectGroup, String> {
+    state
+        .store
+        .lock()
+        .map_err(lock_error)?
+        .create_project_group(&name)
+}
+
+#[tauri::command]
+pub fn update_project_group(
+    state: State<ManagedState>,
+    group: ProjectGroup,
+) -> Result<ProjectGroup, String> {
+    state
+        .store
+        .lock()
+        .map_err(lock_error)?
+        .update_project_group(group)
+}
+
+#[tauri::command]
+pub fn delete_project_group(state: State<ManagedState>, group_id: String) -> Result<(), String> {
+    state
+        .store
+        .lock()
+        .map_err(lock_error)?
+        .delete_project_group(&group_id)
+}
+
+#[tauri::command]
+pub fn reorder_project_groups(
+    state: State<ManagedState>,
+    group_ids: Vec<String>,
+) -> Result<Vec<ProjectGroup>, String> {
+    state
+        .store
+        .lock()
+        .map_err(lock_error)?
+        .reorder_project_groups(&group_ids)
 }
 
 #[tauri::command]
 pub fn save_project(state: State<ManagedState>, project: ProjectConfig) -> Result<(), String> {
     let project_id = project.id.clone();
-    state.store.lock().map_err(lock_error)?.save_project(project)?;
+    state
+        .store
+        .lock()
+        .map_err(lock_error)?
+        .save_project(project)?;
     clear_project_start_assessment_cache(&state, &project_id)
 }
 
@@ -49,7 +111,11 @@ pub fn delete_project(
     project_id: String,
 ) -> Result<(), String> {
     state.runtime_manager.stop_project(&app, &project_id)?;
-    state.store.lock().map_err(lock_error)?.delete_project(&project_id)?;
+    state
+        .store
+        .lock()
+        .map_err(lock_error)?
+        .delete_project(&project_id)?;
     clear_project_start_assessment_cache(&state, &project_id)
 }
 
@@ -89,7 +155,9 @@ pub fn preflight_project_start(
 }
 
 #[tauri::command]
-pub fn inspect_project_directory(project_path: String) -> Result<ProjectDirectoryInspection, String> {
+pub fn inspect_project_directory(
+    project_path: String,
+) -> Result<ProjectDirectoryInspection, String> {
     Ok(inspect_project_directory_impl(
         &project_path,
         &crate::node_manager::list_installed_node_versions(),

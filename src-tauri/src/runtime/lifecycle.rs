@@ -43,8 +43,10 @@ impl RuntimeManager {
         let project_path = PathBuf::from(project.path.trim());
         let start_timestamp_ms = Utc::now().timestamp_millis();
         let started_at = now_iso();
-        let start_assessment = preflight_assessment.unwrap_or_else(|| assess_project_start(&project));
-        let selected_node_version = normalize_node_version(&start_assessment.preflight.selected_node_version);
+        let start_assessment =
+            preflight_assessment.unwrap_or_else(|| assess_project_start(&project));
+        let selected_node_version =
+            normalize_node_version(&start_assessment.preflight.selected_node_version);
 
         if !project_path.exists() || !project_path.is_dir() {
             let message = format!("项目路径不存在: {}", project_path.display());
@@ -110,10 +112,7 @@ impl RuntimeManager {
             ProjectLogLevel::System,
             vec![
                 "环境校验完成。".to_string(),
-                format!(
-                    "正在使用 Node v{} 启动项目。",
-                    selected_node_version
-                ),
+                format!("正在使用 Node v{} 启动项目。", selected_node_version),
                 format!("启动命令: {}", project.start_command),
             ],
         );
@@ -148,25 +147,20 @@ impl RuntimeManager {
                 "未检测到 node_modules，正在自动安装依赖...".to_string(),
             );
 
-            install_project_dependencies_if_missing_with_logs(
-                self,
-                app,
-                &project,
-                &project_path,
-            )
-            .await
-            .map_err(|error| {
-                let message = format!("自动安装依赖失败: {error}");
-                self.emit_start_error(
-                    app,
-                    &project.id,
-                    &project.node_version,
-                    started_at.clone(),
-                    start_timestamp_ms,
-                    message.clone(),
-                );
-                message
-            })?;
+            install_project_dependencies_if_missing_with_logs(self, app, &project, &project_path)
+                .await
+                .map_err(|error| {
+                    let message = format!("自动安装依赖失败: {error}");
+                    self.emit_start_error(
+                        app,
+                        &project.id,
+                        &project.node_version,
+                        started_at.clone(),
+                        start_timestamp_ms,
+                        message.clone(),
+                    );
+                    message
+                })?;
 
             {
                 let mut entries = self.entries.lock().expect("runtime entries poisoned");
@@ -209,7 +203,10 @@ impl RuntimeManager {
             Some(&project.node_version),
             Some(&project_path),
         )?;
-        command.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+        command
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
 
         let mut child = command
             .spawn()
@@ -358,11 +355,7 @@ impl RuntimeManager {
                 },
             });
 
-        push_logs(
-            &mut entry,
-            ProjectLogLevel::System,
-            vec![message.clone()],
-        );
+        push_logs(&mut entry, ProjectLogLevel::System, vec![message.clone()]);
         push_startup_timing_summary(
             &mut entry,
             completed_at_ms,

@@ -1,6 +1,4 @@
-use crate::contracts::{
-    ProjectAddress, ProjectAddressKind, ProjectLogEntry, ProjectLogLevel,
-};
+use crate::contracts::{ProjectAddress, ProjectAddressKind, ProjectLogEntry, ProjectLogLevel};
 
 use super::{
     address::{extract_addresses_from_message, now_iso, translate_runtime_message},
@@ -22,7 +20,11 @@ pub fn push_logs(entry: &mut RuntimeEntry, level: ProjectLogLevel, messages: Vec
         id: format!("{}-{}", entry.runtime.project_id, entry.log_sequence),
         at: now_iso(),
         level,
-        message: messages.join("\n").chars().take(MAX_LOG_MESSAGE_LENGTH).collect(),
+        message: messages
+            .join("\n")
+            .chars()
+            .take(MAX_LOG_MESSAGE_LENGTH)
+            .collect(),
     });
 
     if entry.runtime.recent_logs.len() > MAX_LOG_ENTRIES {
@@ -98,7 +100,11 @@ pub fn update_preview(entry: &mut RuntimeEntry, level: ProjectLogLevel, message:
         return;
     }
 
-    let priority = if level == ProjectLogLevel::Stderr { 2 } else { 1 };
+    let priority = if level == ProjectLogLevel::Stderr {
+        2
+    } else {
+        1
+    };
     if priority >= entry.preview_priority {
         entry.preview_priority = priority;
         entry.runtime.last_message = Some(translate_runtime_message(message));
@@ -261,8 +267,14 @@ mod tests {
 
         assert_eq!(entry.log_sequence, 201);
         assert_eq!(entry.runtime.recent_logs.len(), 200);
-        assert_eq!(entry.runtime.recent_logs.first().map(|log| log.id.as_str()), Some("test-project-2"));
-        assert_eq!(entry.runtime.recent_logs.last().map(|log| log.id.as_str()), Some("test-project-201"));
+        assert_eq!(
+            entry.runtime.recent_logs.first().map(|log| log.id.as_str()),
+            Some("test-project-2")
+        );
+        assert_eq!(
+            entry.runtime.recent_logs.last().map(|log| log.id.as_str()),
+            Some("test-project-201")
+        );
     }
 
     #[test]

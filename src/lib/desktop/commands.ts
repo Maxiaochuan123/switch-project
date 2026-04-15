@@ -21,6 +21,12 @@ export const desktopCommands: Omit<
   "subscribeRuntime" | "subscribeAppCloseRequest" | "subscribeOperation"
 > = {
   listProjects: () => invokeCommand<ProjectConfig[]>("list_projects"),
+  listProjectGroups: () => invokeCommand("list_project_groups"),
+  createProjectGroup: (name) => invokeCommand("create_project_group", { name }),
+  updateProjectGroup: (group) => invokeCommand("update_project_group", { group }),
+  deleteProjectGroup: (groupId) => invokeCommand("delete_project_group", { groupId }),
+  reorderProjectGroups: (groupIds) =>
+    invokeCommand("reorder_project_groups", { groupIds }),
   getProjectPanelSnapshot: () =>
     invokeCommand<ProjectPanelSnapshot>("get_project_panel_snapshot"),
   saveProject: (project) => invokeCommand("save_project", { project }),

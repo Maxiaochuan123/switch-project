@@ -7,8 +7,9 @@ use semver::{Version, VersionReq};
 use serde::Deserialize;
 
 use crate::contracts::{
-    build_run_command as build_package_run_command, normalize_node_version, ProjectCommandSuggestion,
-    ProjectDirectoryInspection, ProjectNodeVersionSource, ProjectPackageManager, ProjectReadiness,
+    build_run_command as build_package_run_command, normalize_node_version,
+    ProjectCommandSuggestion, ProjectDirectoryInspection, ProjectNodeVersionSource,
+    ProjectPackageManager, ProjectReadiness,
 };
 use crate::package_managers::{detect_project_package_manager, list_available_package_managers};
 
@@ -58,10 +59,15 @@ pub fn inspect_project_directory(
     let has_node_modules = resolved_path.join("node_modules").exists();
     let package_manager = detect_project_package_manager(&resolved_path);
     let available_package_managers = list_available_package_managers();
-    let node_recommendation =
-        resolve_node_recommendation(&resolved_path, package_json.as_ref(), installed_node_versions);
+    let node_recommendation = resolve_node_recommendation(
+        &resolved_path,
+        package_json.as_ref(),
+        installed_node_versions,
+    );
     let available_start_commands = build_command_suggestions(
-        package_json.as_ref().and_then(|value| value.scripts.as_ref()),
+        package_json
+            .as_ref()
+            .and_then(|value| value.scripts.as_ref()),
         package_manager,
     );
     let recommended_start_command = available_start_commands
@@ -143,7 +149,10 @@ fn build_readiness(
 
     if let Some(value) = package_manager {
         if !package_manager_available {
-            warnings.push(format!("当前机器还没有安装 {}。", package_manager_label(value)));
+            warnings.push(format!(
+                "当前机器还没有安装 {}。",
+                package_manager_label(value)
+            ));
         }
     }
 
@@ -339,7 +348,11 @@ fn resolve_installed_node_version(hint: &str, installed_versions: &[String]) -> 
     if let Ok(version_req) = VersionReq::parse(&normalized_hint) {
         return installed_versions
             .iter()
-            .filter_map(|candidate| Version::parse(candidate).ok().map(|version| (candidate, version)))
+            .filter_map(|candidate| {
+                Version::parse(candidate)
+                    .ok()
+                    .map(|version| (candidate, version))
+            })
             .find(|(_, version)| version_req.matches(version))
             .map(|(candidate, _)| candidate.clone());
     }

@@ -9,7 +9,9 @@ export type ProjectStatus = "stopped" | "starting" | "running" | "error";
 
 export type ProjectPackageManager = "npm" | "pnpm" | "cnpm" | "yarn";
 
-export type ProjectConfig = { id: string, name: string, path: string, nodeVersion: string, packageManager: ProjectPackageManager, startCommand: string, autoStartOnAppLaunch: boolean, autoOpenLocalUrlOnStart: boolean, };
+export type ProjectConfig = { id: string, name: string, path: string, groupId: string | null, nodeVersion: string, packageManager: ProjectPackageManager, startCommand: string, autoStartOnAppLaunch: boolean, autoOpenLocalUrlOnStart: boolean, };
+
+export type ProjectGroup = { id: string, name: string, order: number, };
 
 export type ProjectAddressKind = "local" | "network" | "other";
 
@@ -41,7 +43,9 @@ export type ProjectDiagnosis = { projectId: string, projectName: string, readine
 
 export type AppStartupSettings = { openAtLogin: boolean, launchMinimizedOnLogin: boolean, };
 
-export type ProjectPanelSnapshot = { projects: Array<ProjectConfig>, runtimes: Array<ProjectRuntime>, environment: DesktopEnvironment, startupSettings: AppStartupSettings, };
+export type ProjectPanelSnapshot = { projects: Array<ProjectConfig>, projectGroups: Array<ProjectGroup>, runtimes: Array<ProjectRuntime>, environment: DesktopEnvironment, startupSettings: AppStartupSettings, };
+
+export type ProjectGroupsExport = { projectGroups: Array<ProjectGroup>, projects: Array<ProjectConfig>, };
 
 export type ProjectStartPreflight = { canStart: boolean, missingDependencies: boolean, selectedNodeVersion: string, hasDeclaredNodeRequirement: boolean, suggestedNodeVersion?: string, installNodeVersion?: string, reasonCode?: BackendErrorCode, reasonMessage?: string, };
 

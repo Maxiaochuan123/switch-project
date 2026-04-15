@@ -146,7 +146,11 @@ impl RuntimeManager {
                 entry.runtime.last_success_at = Some(now_iso());
                 entry.runtime.startup_duration_ms =
                     Some((completed_at_ms - entry.start_timestamp_ms).max(0) as u64);
-                push_startup_timing_summary(entry, completed_at_ms, StartupTimingSummaryKind::Ready);
+                push_startup_timing_summary(
+                    entry,
+                    completed_at_ms,
+                    StartupTimingSummaryKind::Ready,
+                );
             }
 
             entry.runtime.failure_message = None;

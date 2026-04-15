@@ -10,6 +10,7 @@ export type ProjectDraft = {
   id?: string;
   name: string;
   path: string;
+  groupId: string | null;
   nodeVersion: string;
   packageManager: ProjectPackageManager | "";
   startCommand: string;
@@ -35,6 +36,7 @@ export function createEmptyProjectDraft(): ProjectDraft {
   return {
     name: "",
     path: "",
+    groupId: null,
     nodeVersion: "",
     packageManager: "",
     startCommand: "",
