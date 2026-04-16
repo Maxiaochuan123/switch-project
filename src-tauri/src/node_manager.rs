@@ -8,6 +8,7 @@ use std::{
 };
 
 use regex::Regex;
+use serde::Deserialize;
 use tokio::process::Command;
 use tokio::time::{sleep, Duration};
 
@@ -43,8 +44,17 @@ struct NodeManagerCache {
     fnm_executable: Option<TimedCacheValue<PathBuf>>,
     node_manager_version: Option<TimedCacheValue<String>>,
     active_node_version: Option<TimedCacheValue<String>>,
+    default_node_version: Option<TimedCacheValue<String>>,
     installed_node_versions: Option<TimedCacheValue<Vec<String>>>,
     nvm_installed_node_versions: Option<TimedCacheValue<Vec<String>>>,
+    latest_lts_versions: Option<TimedCacheValue<Vec<String>>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct NodeReleaseEntry {
+    version: String,
+    #[serde(default)]
+    lts: serde_json::Value,
 }
 
 fn node_manager_cache() -> &'static Mutex<NodeManagerCache> {
@@ -123,6 +133,41 @@ pub fn resolve_active_node_version() -> Option<String> {
         .lock()
         .expect("node manager cache poisoned")
         .active_node_version = Some(TimedCacheValue::new(normalized.clone()));
+
+    Some(normalized)
+}
+
+pub fn resolve_default_node_version() -> Option<String> {
+    if let Some(version) = node_manager_cache()
+        .lock()
+        .expect("node manager cache poisoned")
+        .default_node_version
+        .as_ref()
+        .filter(|entry| entry.is_fresh())
+        .map(|entry| entry.value.clone())
+    {
+        return Some(version);
+    }
+
+    let fnm_executable = resolve_fnm_executable()?;
+    let output = StdCommand::new(fnm_executable)
+        .arg("default")
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+
+    let version = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let normalized = normalize_node_version(&version);
+    if normalized.is_empty() {
+        return None;
+    }
+
+    node_manager_cache()
+        .lock()
+        .expect("node manager cache poisoned")
+        .default_node_version = Some(TimedCacheValue::new(normalized.clone()));
 
     Some(normalized)
 }
@@ -315,6 +360,143 @@ pub async fn install_node_version(version: &str) -> Result<(), String> {
     } else {
         "安装 Node 版本失败。".to_string()
     })
+}
+
+pub async fn delete_node_version(version: &str) -> Result<(), String> {
+    let normalized_version = normalize_node_version(version);
+    if normalized_version.trim().is_empty() {
+        return Err("Node 版本不能为空。".to_string());
+    }
+
+    if !list_installed_node_versions()
+        .iter()
+        .any(|current| current == &normalized_version)
+    {
+        return Ok(());
+    }
+
+    let fnm_executable =
+        resolve_fnm_executable().ok_or_else(|| "未检测到 fnm，无法删除 Node 版本。".to_string())?;
+
+    let mut command = Command::new(fnm_executable);
+    command.arg("uninstall").arg(&normalized_version);
+
+    #[cfg(target_os = "windows")]
+    command.creation_flags(CREATE_NO_WINDOW);
+
+    let output = command
+        .output()
+        .await
+        .map_err(|error| format!("删除 Node 版本失败: {error}"))?;
+
+    if output.status.success() {
+        clear_node_manager_cache();
+        return Ok(());
+    }
+
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+
+    Err(if !stderr.is_empty() {
+        format!("删除 Node 版本失败: {stderr}")
+    } else if !stdout.is_empty() {
+        format!("删除 Node 版本失败: {stdout}")
+    } else {
+        "删除 Node 版本失败。".to_string()
+    })
+}
+
+pub async fn set_default_node_version(version: &str) -> Result<(), String> {
+    let normalized_version = normalize_node_version(version);
+    if normalized_version.trim().is_empty() {
+        return Err("Node 版本不能为空。".to_string());
+    }
+
+    if resolve_default_node_version().as_deref() == Some(normalized_version.as_str()) {
+        return Ok(());
+    }
+
+    if !list_installed_node_versions()
+        .iter()
+        .any(|current| current == &normalized_version)
+    {
+        return Err("所选 Node 版本尚未安装，无法设为默认。".to_string());
+    }
+
+    let fnm_executable = resolve_fnm_executable()
+        .ok_or_else(|| "未检测到 fnm，无法切换默认 Node 版本。".to_string())?;
+
+    let mut command = Command::new(fnm_executable);
+    command.arg("default").arg(&normalized_version);
+
+    #[cfg(target_os = "windows")]
+    command.creation_flags(CREATE_NO_WINDOW);
+
+    let output = command
+        .output()
+        .await
+        .map_err(|error| format!("切换默认 Node 版本失败: {error}"))?;
+
+    if output.status.success() {
+        clear_node_manager_cache();
+        return Ok(());
+    }
+
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+
+    Err(if !stderr.is_empty() {
+        format!("切换默认 Node 版本失败: {stderr}")
+    } else if !stdout.is_empty() {
+        format!("切换默认 Node 版本失败: {stdout}")
+    } else {
+        "切换默认 Node 版本失败。".to_string()
+    })
+}
+
+pub async fn list_latest_lts_node_versions() -> Result<Vec<String>, String> {
+    if let Some(versions) = node_manager_cache()
+        .lock()
+        .expect("node manager cache poisoned")
+        .latest_lts_versions
+        .as_ref()
+        .filter(|entry| entry.is_fresh())
+        .map(|entry| entry.value.clone())
+    {
+        return Ok(versions);
+    }
+
+    let response = reqwest::Client::new()
+        .get("https://nodejs.org/dist/index.json")
+        .send()
+        .await
+        .map_err(|error| format!("获取最新 LTS 版本失败: {error}"))?;
+
+    let releases = response
+        .error_for_status()
+        .map_err(|error| format!("获取最新 LTS 版本失败: {error}"))?
+        .json::<Vec<NodeReleaseEntry>>()
+        .await
+        .map_err(|error| format!("解析最新 LTS 版本失败: {error}"))?;
+
+    let mut seen = HashSet::new();
+    let mut versions = releases
+        .into_iter()
+        .filter(|release| release.lts.is_string())
+        .map(|release| normalize_node_version(&release.version))
+        .filter(|version| !version.is_empty())
+        .filter(|version| seen.insert(version.clone()))
+        .collect::<Vec<_>>();
+
+    versions.sort_by(compare_node_versions);
+    versions.truncate(10);
+
+    node_manager_cache()
+        .lock()
+        .expect("node manager cache poisoned")
+        .latest_lts_versions = Some(TimedCacheValue::new(versions.clone()));
+
+    Ok(versions)
 }
 
 pub fn resolve_fnm_executable() -> Option<PathBuf> {

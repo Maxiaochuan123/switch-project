@@ -12,6 +12,7 @@ const DEFAULT_ENVIRONMENT: DesktopEnvironment = {
   installedNodeVersions: [],
   nvmInstalledNodeVersions: [],
   activeNodeVersion: null,
+  defaultNodeVersion: null,
   availablePackageManagers: [],
   rimrafInstalled: false,
   nodeManager: "fnm",

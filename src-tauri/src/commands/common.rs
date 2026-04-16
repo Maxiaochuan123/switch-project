@@ -12,7 +12,7 @@ use crate::{
     lock_error,
     node_manager::{
         is_node_manager_available, list_installed_node_versions, list_nvm_installed_node_versions,
-        resolve_active_node_version, resolve_node_manager_version,
+    resolve_active_node_version, resolve_default_node_version, resolve_node_manager_version,
     },
     package_managers::list_available_package_managers,
     project_directory::inspect_project_directory as inspect_project_directory_impl,
@@ -543,6 +543,7 @@ pub fn build_desktop_environment() -> Result<DesktopEnvironment, String> {
         installed_node_versions: list_installed_node_versions(),
         nvm_installed_node_versions: list_nvm_installed_node_versions(),
         active_node_version: resolve_active_node_version(),
+        default_node_version: resolve_default_node_version(),
         available_package_managers: list_available_package_managers(),
         rimraf_installed: is_delete_tool_ready()?,
         node_manager: NodeManagerKind::Fnm,

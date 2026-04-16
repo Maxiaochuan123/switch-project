@@ -64,6 +64,7 @@ type ProjectFormDialogProps = {
   installedNodeVersions: string[];
   nvmInstalledNodeVersions: string[];
   activeNodeVersion: string | null;
+  defaultNodeVersion: string | null;
   projectGroups: ProjectGroup[];
   installedPackageManagers: ProjectPackageManager[];
   isSubmitting: boolean;
@@ -137,6 +138,7 @@ export function ProjectFormDialog({
   installedNodeVersions,
   nvmInstalledNodeVersions,
   activeNodeVersion,
+  defaultNodeVersion,
   projectGroups,
   installedPackageManagers,
   isSubmitting,
@@ -212,11 +214,12 @@ export function ProjectFormDialog({
       selectBestAvailableNodeVersion(
         pathInspection?.nodeVersionHint ?? pathInspection?.recommendedNodeVersion,
         availableNodeVersions,
-        activeNodeVersion
+        defaultNodeVersion || activeNodeVersion
       ),
     [
       activeNodeVersion,
       availableNodeVersions,
+      defaultNodeVersion,
       pathInspection?.nodeVersionHint,
       pathInspection?.recommendedNodeVersion,
     ]
@@ -295,16 +298,21 @@ export function ProjectFormDialog({
   const installTargetVersion =
     pathInspection?.recommendedNodeVersion || selectedNodeVersion || nodeRequirement;
   const selectedNodeVersionLabel = selectedNodeVersion || suggestedNodeVersion || "";
+  const normalizedDefaultNodeVersion = defaultNodeVersion
+    ? normalizeNodeVersion(defaultNodeVersion)
+    : "";
   const normalizedActiveNodeVersion = activeNodeVersion
     ? normalizeNodeVersion(activeNodeVersion)
     : "";
+  const normalizedPreferredNodeVersion =
+    normalizedDefaultNodeVersion || normalizedActiveNodeVersion;
   const normalizedSelectedNodeVersion = selectedNodeVersionLabel
     ? normalizeNodeVersion(selectedNodeVersionLabel)
     : "";
-  const isUsingSystemNodeByDefault =
+  const isUsingPreferredNodeByDefault =
     !nodeRequirement &&
-    Boolean(normalizedActiveNodeVersion) &&
-    normalizedSelectedNodeVersion === normalizedActiveNodeVersion;
+    Boolean(normalizedPreferredNodeVersion) &&
+    normalizedSelectedNodeVersion === normalizedPreferredNodeVersion;
   const canMigrateSelectedVersion =
     Boolean(selectedNodeVersionLabel) &&
     !hasInstalledNodeVersion(installedNodeVersions, selectedNodeVersionLabel) &&
@@ -624,9 +632,11 @@ export function ProjectFormDialog({
                       </p>
                     ) : selectedNodeVersionLabel ? (
                       <p className="text-xs text-muted-foreground">
-                        {isUsingSystemNodeByDefault
-                          ? `未检测到项目中的 Node 版本约束，默认使用当前系统 Node v${normalizedSelectedNodeVersion}`
-                          : `未检测到项目中的 Node 版本约束，当前使用可用的 Node v${normalizedSelectedNodeVersion}`}
+              {isUsingPreferredNodeByDefault
+                ? normalizedDefaultNodeVersion
+                  ? `未检测到项目中的 Node 版本约束，默认使用 fnm 默认 Node v${normalizedSelectedNodeVersion}`
+                  : `未检测到项目中的 Node 版本约束，默认使用当前系统 Node v${normalizedSelectedNodeVersion}`
+                : `未检测到项目中的 Node 版本约束，当前使用可用的 Node v${normalizedSelectedNodeVersion}`}
                       </p>
                     ) : null}
                     {canMigrateSelectedVersion ? (

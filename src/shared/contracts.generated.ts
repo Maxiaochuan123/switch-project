@@ -29,7 +29,11 @@ export type NodeManagerInstallAttempt = { installer: string, command: string, ex
 
 export type NodeManagerInstallResult = { success: boolean, message: string, installer?: string, version?: string, attempts: Array<NodeManagerInstallAttempt>, };
 
-export type DesktopEnvironment = { installedNodeVersions: Array<string>, nvmInstalledNodeVersions: Array<string>, activeNodeVersion: string | null, availablePackageManagers: Array<ProjectPackageManager>, rimrafInstalled: boolean, nodeManager: NodeManagerKind, nodeManagerAvailable: boolean, nodeManagerVersion: string | null, };
+export type DesktopEnvironment = { installedNodeVersions: Array<string>, nvmInstalledNodeVersions: Array<string>, activeNodeVersion: string | null, defaultNodeVersion: string | null, availablePackageManagers: Array<ProjectPackageManager>, rimrafInstalled: boolean, nodeManager: NodeManagerKind, nodeManagerAvailable: boolean, nodeManagerVersion: string | null, };
+
+export type NodeVersionUsageProject = { projectId: string, projectName: string, };
+
+export type NodeVersionManagerSnapshot = { installedVersions: Array<string>, latestLtsVersions: Array<string>, latestLtsError?: string, activeNodeVersion?: string, defaultNodeVersion?: string, usageByVersion: { [key in string]: Array<NodeVersionUsageProject> }, };
 
 export type ProjectNodeVersionSource = "nvmrc" | "node-version" | "volta" | "package-engines";
 

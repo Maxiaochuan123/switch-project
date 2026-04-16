@@ -77,15 +77,10 @@ export function useProjectUtilityActions({
           return;
         }
 
-        const result = await desktopApi.importProjects(filePath);
+        await desktopApi.importProjects(filePath);
         await loadProjectData();
 
-        toast.success(
-          getToastContent(
-            "备份恢复完成",
-            `新增 ${result.added} 个项目，更新 ${result.updated} 个项目，跳过 ${result.skipped} 个项目。`
-          )
-        );
+        toast.success(getToastContent("备份已恢复"));
       },
       400
     );

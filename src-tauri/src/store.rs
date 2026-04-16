@@ -366,12 +366,28 @@ impl AppStore {
             let normalized_name = normalize_project_group_name(&group.name)?;
             let imported_group_id = group.id;
 
-            if let Some(existing_group) = self
+            if let Some(existing_group_index) = self
                 .data
                 .project_groups
                 .iter()
-                .find(|current| current.id == imported_group_id)
+                .position(|current| current.id == imported_group_id)
             {
+                let name_available = self.data.project_groups.iter().all(|current| {
+                    current.id == imported_group_id
+                        || !current.name.eq_ignore_ascii_case(&normalized_name)
+                });
+                let existing_group = &mut self.data.project_groups[existing_group_index];
+
+                if existing_group.order != group.order {
+                    existing_group.order = group.order;
+                    changed = true;
+                }
+
+                if name_available && existing_group.name != normalized_name {
+                    existing_group.name = normalized_name;
+                    changed = true;
+                }
+
                 group_id_map.insert(imported_group_id.clone(), existing_group.id.clone());
                 continue;
             }

@@ -316,6 +316,7 @@ export function areDesktopEnvironmentsEqual(left: DesktopEnvironment, right: Des
 
   if (
     left.activeNodeVersion !== right.activeNodeVersion ||
+    left.defaultNodeVersion !== right.defaultNodeVersion ||
     left.rimrafInstalled !== right.rimrafInstalled ||
     left.nodeManager !== right.nodeManager ||
     left.nodeManagerAvailable !== right.nodeManagerAvailable ||

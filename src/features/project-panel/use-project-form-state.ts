@@ -78,7 +78,7 @@ export function useProjectFormState({
       const suggestedNodeVersion = selectBestAvailableNodeVersion(
         inspection.nodeVersionHint ?? inspection.recommendedNodeVersion,
         availableNodeVersions,
-        environment.activeNodeVersion
+        environment.defaultNodeVersion || environment.activeNodeVersion
       );
       const currentDraft = currentDraftRef.current;
       const allowEditInspectionAutofill = allowEditInspectionAutofillRef.current;

@@ -375,8 +375,6 @@ export const ProjectCard = memo(function ProjectCard({
             <div
               ref={menuRef}
               className="relative"
-              onMouseEnter={() => setMenuOpen(true)}
-              onMouseLeave={() => setMenuOpen(false)}
             >
               <Button
                 type="button"

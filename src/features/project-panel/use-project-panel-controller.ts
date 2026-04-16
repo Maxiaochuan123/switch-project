@@ -1,5 +1,15 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { ProjectConfig } from "@/shared/contracts";
+import { desktopApi } from "@/lib/desktop";
+import {
+  normalizeNodeVersion,
+  type NodeVersionManagerSnapshot,
+  type NodeVersionUsageProject,
+  type OperationEvent,
+  type ProjectConfig,
+  type ProjectDiagnosis,
+  type ProjectGroup,
+  type ProjectRuntime,
+} from "@/shared/contracts";
 import { getMissingNodeVersions } from "./project-draft";
 import { useActionLocks } from "./use-action-locks";
 import { useProjectAppActions } from "./use-project-app-actions";
@@ -9,6 +19,7 @@ import { useProjectDialogState } from "./use-project-dialog-state";
 import { useProjectFeedback } from "./use-project-feedback";
 import { useProjectFormState } from "./use-project-form-state";
 import { useProjectGroupActions } from "./use-project-group-actions";
+import { getErrorMessage } from "./helpers";
 import { useProjectManagementActions } from "./use-project-management-actions";
 import { useProjectNodeManagerActions } from "./use-project-node-manager-actions";
 import { useProjectRunActions } from "./use-project-run-actions";
@@ -29,6 +40,103 @@ type PendingProjectGroupReassign = {
   projects: ProjectConfig[];
 };
 
+type GroupTabViewModel = {
+  key: string;
+  name: string;
+  count: number;
+};
+
+type ProjectCardViewModel = {
+  key: string;
+  project: ProjectConfig;
+  runtime?: ProjectRuntime;
+  runtimeFailureMessage?: string;
+  operationPanel?: OperationEvent;
+  diagnosis?: ProjectDiagnosis;
+  isDiagnosisPending: boolean;
+  isStartPending: boolean;
+  isStopPending: boolean;
+  isStartLocked: boolean;
+  isStopLocked: boolean;
+  isEditLocked: boolean;
+  isDeleteLocked: boolean;
+  isDeleteNodeModulesLocked: boolean;
+  isReinstallNodeModulesLocked: boolean;
+  isTerminalLocked: boolean;
+  isDirectoryLocked: boolean;
+  isAddressLocked: boolean;
+  isMoveGroupLocked: boolean;
+  availableGroups: Pick<ProjectGroup, "id" | "name">[];
+  onEdit: () => void;
+  onDelete: () => void;
+  onDeleteNodeModules: () => void;
+  onReinstallNodeModules: () => void;
+  onOpenTerminalOutput: () => void;
+  onStart: () => void;
+  onStop: () => void;
+  onOpenDirectory: () => void;
+  onOpenUrl: (url: string) => void;
+  onOpenMoveGroupDialog: () => void;
+};
+
+type VisibleProjectCardViewModel = ProjectCardViewModel & {
+  groupBadgeLabel: string | null;
+};
+
+type NodeVersionDeleteRequest = {
+  version: string;
+  projects: NodeVersionUsageProject[];
+};
+
+type PageViewModel = {
+  isLoading: boolean;
+  loadingProjectCount: number;
+  hasProjects: boolean;
+  hasProjectGroups: boolean;
+  groupTabs: GroupTabViewModel[];
+  activeGroupTab: string;
+  visibleProjectCards: VisibleProjectCardViewModel[];
+  selectedManagedGroup: ProjectGroup | null;
+  isActionLocked: (key: string) => boolean;
+  runLockedAction: (
+    key: string,
+    action: () => Promise<void> | void,
+    cooldownMs?: number
+  ) => Promise<void>;
+  handleImportProjects: () => Promise<void>;
+  handleExportProjects: () => Promise<void>;
+  setActiveGroupTab: (value: string) => void;
+  handleCreateGroup: () => void;
+  handleOpenAssignProjectsDialog: () => void;
+  handleRenameActiveGroup: () => void;
+  handleDeleteActiveGroup: () => void;
+  openStartupSettingsDialog: () => void;
+  openNodeVersionManagerDialog: () => void;
+  openCreateDialog: () => void;
+};
+
+type NodeVersionManagerDialogViewModel = {
+  open: boolean;
+  isLoading: boolean;
+  installedVersions: string[];
+  latestLtsVersions: string[];
+  latestLtsError: string | null;
+  activeNodeVersion: string | null;
+  defaultNodeVersion: string | null;
+  usageByVersion: Record<string, NodeVersionUsageProject[]>;
+  installingVersion: string | null;
+  deletingVersion: string | null;
+  switchingVersion: string | null;
+  pendingDeleteVersion: string | null;
+  pendingDeleteProjects: NodeVersionUsageProject[];
+  onOpenChange: (open: boolean) => void;
+  onInstall: (version: string) => void;
+  onSwitchDefault: (version: string) => void;
+  onRequestDelete: (version: string) => void;
+  onConfirmDelete: () => void;
+  onPendingDeleteOpenChange: (open: boolean) => void;
+};
+
 export function useProjectPanelController() {
   const [projectGroupMoveTarget, setProjectGroupMoveTarget] = useState<{
     id: string;
@@ -39,6 +147,19 @@ export function useProjectPanelController() {
     useState<ProjectGroupBatchAssignTarget | null>(null);
   const [pendingProjectGroupReassign, setPendingProjectGroupReassign] =
     useState<PendingProjectGroupReassign | null>(null);
+  const [isNodeVersionManagerDialogOpen, setIsNodeVersionManagerDialogOpen] =
+    useState(false);
+  const [isNodeVersionManagerLoading, setIsNodeVersionManagerLoading] = useState(false);
+  const [nodeVersionManagerSnapshot, setNodeVersionManagerSnapshot] =
+    useState<NodeVersionManagerSnapshot | null>(null);
+  const [installingManagedNodeVersion, setInstallingManagedNodeVersion] =
+    useState<string | null>(null);
+  const [deletingManagedNodeVersion, setDeletingManagedNodeVersion] =
+    useState<string | null>(null);
+  const [switchingManagedNodeVersion, setSwitchingManagedNodeVersion] =
+    useState<string | null>(null);
+  const [pendingNodeVersionDelete, setPendingNodeVersionDelete] =
+    useState<NodeVersionDeleteRequest | null>(null);
 
   const { isActionLocked, runLockedAction } = useActionLocks();
   const { setFeedback } = useProjectFeedback();
@@ -167,6 +288,27 @@ export function useProjectPanelController() {
     syncRuntimes,
   });
 
+  const loadNodeVersionManagerSnapshot = useCallback(async () => {
+    setIsNodeVersionManagerLoading(true);
+
+    try {
+      const snapshot = await desktopApi.getNodeVersionManagerSnapshot();
+      setNodeVersionManagerSnapshot(snapshot);
+    } catch (error) {
+      setFeedback({
+        variant: "destructive",
+        title: "读取 Node 版本信息失败",
+        message: getErrorMessage(error),
+      });
+    } finally {
+      setIsNodeVersionManagerLoading(false);
+    }
+  }, [setFeedback]);
+
+  const refreshNodeVersionManagerData = useCallback(async () => {
+    await Promise.all([loadProjectData(), loadNodeVersionManagerSnapshot()]);
+  }, [loadNodeVersionManagerSnapshot, loadProjectData]);
+
   const {
     handleInstallNodeManager,
     handleOpenNodeManagerGuide,
@@ -180,6 +322,41 @@ export function useProjectPanelController() {
     setNodeManagerInstallResult,
   });
 
+  const [isNodeVersionSyncDismissed, setIsNodeVersionSyncDismissed] = useState(false);
+  const [activeGroupTab, setActiveGroupTab] = useState(ALL_GROUP_TAB_KEY);
+
+  const projectCountsByGroupId = useMemo(
+    () =>
+      projects.reduce<Record<string, number>>((counts, project) => {
+        const key = project.groupId ?? UNGROUPED_SECTION_KEY;
+        counts[key] = (counts[key] ?? 0) + 1;
+        return counts;
+      }, {}),
+    [projects]
+  );
+
+  const {
+    clearDraftProjectGroups,
+    draftProjectGroups,
+    handleDeleteProjectGroup,
+    handleProjectGroupDialogOpenChange: handleProjectGroupDialogOpenChangeInternal,
+    handleSaveProjectGroup,
+    openCreateProjectGroupDialog,
+    openRenameProjectGroupDialog,
+    projectGroupDialogError,
+  } = useProjectGroupActions({
+    loadProjectData,
+    projects,
+    projectGroups,
+    setDeleteProjectGroupTarget,
+    setFeedback,
+    setIsSubmittingProjectGroup,
+    setProjectDraft,
+    setProjectGroupDraft,
+    setProjectGroups,
+    syncProjects,
+  });
+
   const {
     handleAssignProjectsToGroup,
     handleDeleteProject,
@@ -187,13 +364,16 @@ export function useProjectPanelController() {
     handleSaveProject,
     isSubmitting,
   } = useProjectManagementActions({
+    clearDraftProjectGroups,
     deleteTarget,
     getProjectById,
     handleProjectDialogOpenChange,
     loadProjectData,
+    pendingProjectGroups: draftProjectGroups,
     projects,
     refreshProjectDiagnosis,
     runtimes,
+    setActiveGroupTab,
     setDeleteTarget,
     setFeedback,
     setFormError,
@@ -242,39 +422,6 @@ export function useProjectPanelController() {
     syncRuntimes,
   });
 
-  const [isNodeVersionSyncDismissed, setIsNodeVersionSyncDismissed] = useState(false);
-  const [activeGroupTab, setActiveGroupTab] = useState(ALL_GROUP_TAB_KEY);
-
-  const projectCountsByGroupId = useMemo(
-    () =>
-      projects.reduce<Record<string, number>>((counts, project) => {
-        const key = project.groupId ?? UNGROUPED_SECTION_KEY;
-        counts[key] = (counts[key] ?? 0) + 1;
-        return counts;
-      }, {}),
-    [projects]
-  );
-
-  const {
-    handleDeleteProjectGroup,
-    handleProjectGroupDialogOpenChange: handleProjectGroupDialogOpenChangeInternal,
-    handleSaveProjectGroup,
-    openCreateProjectGroupDialog,
-    openRenameProjectGroupDialog,
-    projectGroupDialogError,
-  } = useProjectGroupActions({
-    loadProjectData,
-    projects,
-    projectGroups,
-    setDeleteProjectGroupTarget,
-    setFeedback,
-    setIsSubmittingProjectGroup,
-    setProjectDraft,
-    setProjectGroupDraft,
-    setProjectGroups,
-    syncProjects,
-  });
-
   const missingNvmNodeVersions = useMemo(
     () =>
       getMissingNodeVersions(
@@ -315,12 +462,132 @@ export function useProjectPanelController() {
     startupSettingsDraft,
   });
 
+  const openNodeVersionManagerDialog = useCallback(() => {
+    setIsNodeVersionManagerDialogOpen(true);
+    void loadNodeVersionManagerSnapshot();
+  }, [loadNodeVersionManagerSnapshot]);
+
+  const handleInstallManagedNodeVersion = useCallback(
+    async (version: string) => {
+      const normalizedVersion = normalizeNodeVersion(version);
+
+      await runLockedAction("node-version-manager-install", async () => {
+        setInstallingManagedNodeVersion(normalizedVersion);
+
+        try {
+          await desktopApi.installNodeVersion(normalizedVersion);
+          await refreshNodeVersionManagerData();
+          setFeedback({
+            variant: "default",
+            title: `Node v${normalizedVersion} 已安装`,
+            message: "现在可以把它设为默认版本，或在项目里直接使用。",
+          });
+        } catch (error) {
+          setFeedback({
+            variant: "destructive",
+            title: "安装 Node 版本失败",
+            message: getErrorMessage(error),
+          });
+        } finally {
+          setInstallingManagedNodeVersion(null);
+        }
+      });
+    },
+    [refreshNodeVersionManagerData, runLockedAction, setFeedback]
+  );
+
+  const handleSetManagedDefaultNodeVersion = useCallback(
+    async (version: string) => {
+      const normalizedVersion = normalizeNodeVersion(version);
+
+      await runLockedAction("node-version-manager-default", async () => {
+        setSwitchingManagedNodeVersion(normalizedVersion);
+
+        try {
+          await desktopApi.setDefaultNodeVersion(normalizedVersion);
+          await refreshNodeVersionManagerData();
+          setFeedback({
+            variant: "default",
+            title: `默认 Node 已切换到 v${normalizedVersion}`,
+            message: "面板后续会优先使用这个 fnm 默认版本。",
+          });
+        } catch (error) {
+          setFeedback({
+            variant: "destructive",
+            title: "切换默认 Node 版本失败",
+            message: getErrorMessage(error),
+          });
+        } finally {
+          setSwitchingManagedNodeVersion(null);
+        }
+      });
+    },
+    [refreshNodeVersionManagerData, runLockedAction, setFeedback]
+  );
+
+  const handleDeleteManagedNodeVersion = useCallback(
+    async (version: string) => {
+      const normalizedVersion = normalizeNodeVersion(version);
+
+      await runLockedAction("node-version-manager-delete", async () => {
+        setDeletingManagedNodeVersion(normalizedVersion);
+
+        try {
+          await desktopApi.deleteNodeVersion(normalizedVersion);
+          setPendingNodeVersionDelete(null);
+          await refreshNodeVersionManagerData();
+          setFeedback({
+            variant: "default",
+            title: `Node v${normalizedVersion} 已删除`,
+            message: "相关版本列表已经刷新。",
+          });
+        } catch (error) {
+          setFeedback({
+            variant: "destructive",
+            title: "删除 Node 版本失败",
+            message: getErrorMessage(error),
+          });
+        } finally {
+          setDeletingManagedNodeVersion(null);
+        }
+      });
+    },
+    [refreshNodeVersionManagerData, runLockedAction, setFeedback]
+  );
+
+  const handleRequestDeleteManagedNodeVersion = useCallback(
+    (version: string) => {
+      const normalizedVersion = normalizeNodeVersion(version);
+      const usageProjects =
+        nodeVersionManagerSnapshot?.usageByVersion[normalizedVersion] ?? [];
+
+      if (usageProjects.length > 0) {
+        setPendingNodeVersionDelete({
+          version: normalizedVersion,
+          projects: usageProjects,
+        });
+        return;
+      }
+
+      void handleDeleteManagedNodeVersion(normalizedVersion);
+    },
+    [handleDeleteManagedNodeVersion, nodeVersionManagerSnapshot]
+  );
+
+  const handleConfirmDeleteManagedNodeVersion = useCallback(async () => {
+    if (!pendingNodeVersionDelete) {
+      return;
+    }
+
+    await handleDeleteManagedNodeVersion(pendingNodeVersionDelete.version);
+  }, [handleDeleteManagedNodeVersion, pendingNodeVersionDelete]);
+
   const projectGroupNameMap = useMemo(
     () => Object.fromEntries(projectGroups.map((group) => [group.id, group.name])),
     [projectGroups]
   );
 
-  const projectCards = useMemo(
+  const projectCards = useMemo<ProjectCardViewModel[]>(
     () =>
       projects.map((project) => ({
         key: project.id,
@@ -412,11 +679,11 @@ export function useProjectPanelController() {
     ]
   );
 
-  const groupTabs = useMemo(
+  const groupTabs = useMemo<GroupTabViewModel[]>(
     () => [
       {
         key: ALL_GROUP_TAB_KEY,
-        name: "全部",
+        name: "未分组",
         count: projects.length,
       },
       ...projectGroups.map((group) => ({
@@ -428,9 +695,9 @@ export function useProjectPanelController() {
     [projectCountsByGroupId, projectGroups, projects.length]
   );
 
-  const visibleProjectCards = useMemo(() => {
+  const visibleProjectCards = useMemo<VisibleProjectCardViewModel[]>(() => {
     if (activeGroupTab === ALL_GROUP_TAB_KEY) {
-      return projectCards.map((card) => ({
+      return projectCards.map((card): VisibleProjectCardViewModel => ({
         ...card,
         groupBadgeLabel: (card.project.groupId ?? null)
           ? projectGroupNameMap[card.project.groupId ?? ""] ?? null
@@ -440,7 +707,7 @@ export function useProjectPanelController() {
 
     return projectCards
       .filter((card) => (card.project.groupId ?? null) === activeGroupTab)
-      .map((card) => ({
+      .map((card): VisibleProjectCardViewModel => ({
         ...card,
         groupBadgeLabel: null,
       }));
@@ -536,7 +803,7 @@ export function useProjectPanelController() {
   }, [handleAssignProjectsToGroup, pendingProjectGroupReassign]);
 
   const page = useMemo(
-    () => ({
+    (): PageViewModel => ({
       isLoading,
       loadingProjectCount,
       hasProjects: projects.length > 0,
@@ -570,6 +837,7 @@ export function useProjectPanelController() {
         }
       },
       openStartupSettingsDialog,
+      openNodeVersionManagerDialog,
       openCreateDialog,
     }),
     [
@@ -582,6 +850,7 @@ export function useProjectPanelController() {
       loadingProjectCount,
       openCreateDialog,
       openCreateProjectGroupDialog,
+      openNodeVersionManagerDialog,
       openRenameProjectGroupDialog,
       openStartupSettingsDialog,
       projectGroups.length,
@@ -597,11 +866,12 @@ export function useProjectPanelController() {
     () => ({
       open: isProjectDialogOpen,
       draft: projectDraft,
-      projectGroups,
+      projectGroups: [...projectGroups, ...draftProjectGroups],
       submitErrorMessage: formError,
       installedNodeVersions: environment.installedNodeVersions,
       nvmInstalledNodeVersions: environment.nvmInstalledNodeVersions,
       activeNodeVersion: environment.activeNodeVersion,
+      defaultNodeVersion: environment.defaultNodeVersion,
       installedPackageManagers: environment.availablePackageManagers,
       isSubmitting,
       isInspectingProject,
@@ -615,13 +885,21 @@ export function useProjectPanelController() {
       onBrowsePath: handleBrowseProjectPath,
       onOpenCreateGroup: (): void => openCreateProjectGroupDialog(true),
       onPathSelected: handleDropzonePath,
-      onOpenChange: handleProjectDialogOpenChange,
+      onOpenChange: (open: boolean): void => {
+        if (!open) {
+          clearDraftProjectGroups();
+        }
+        handleProjectDialogOpenChange(open);
+      },
       onSubmit: handleSaveProject,
     }),
     [
+      clearDraftProjectGroups,
+      draftProjectGroups,
       dropzoneError,
       environment.activeNodeVersion,
       environment.availablePackageManagers,
+      environment.defaultNodeVersion,
       environment.installedNodeVersions,
       environment.nvmInstalledNodeVersions,
       formError,
@@ -727,6 +1005,60 @@ export function useProjectPanelController() {
       isStartupSettingsDialogOpen,
       setStartupSettingsDraft,
       startupSettingsDraft,
+    ]
+  );
+
+  const nodeVersionManagerDialog = useMemo<NodeVersionManagerDialogViewModel>(
+    () => ({
+      open: isNodeVersionManagerDialogOpen,
+      isLoading: isNodeVersionManagerLoading,
+      installedVersions: nodeVersionManagerSnapshot?.installedVersions ?? [],
+      latestLtsVersions: nodeVersionManagerSnapshot?.latestLtsVersions ?? [],
+      latestLtsError: nodeVersionManagerSnapshot?.latestLtsError ?? null,
+      activeNodeVersion: nodeVersionManagerSnapshot?.activeNodeVersion ?? null,
+      defaultNodeVersion: nodeVersionManagerSnapshot?.defaultNodeVersion ?? null,
+      usageByVersion: nodeVersionManagerSnapshot?.usageByVersion ?? {},
+      installingVersion: installingManagedNodeVersion,
+      deletingVersion: deletingManagedNodeVersion,
+      switchingVersion: switchingManagedNodeVersion,
+      pendingDeleteVersion: pendingNodeVersionDelete?.version ?? null,
+      pendingDeleteProjects: pendingNodeVersionDelete?.projects ?? [],
+      onOpenChange: (open: boolean): void => {
+        setIsNodeVersionManagerDialogOpen(open);
+        if (!open) {
+          setPendingNodeVersionDelete(null);
+        }
+      },
+      onInstall: (version: string): void => {
+        void handleInstallManagedNodeVersion(version);
+      },
+      onSwitchDefault: (version: string): void => {
+        void handleSetManagedDefaultNodeVersion(version);
+      },
+      onRequestDelete: (version: string): void => {
+        handleRequestDeleteManagedNodeVersion(version);
+      },
+      onConfirmDelete: (): void => {
+        void handleConfirmDeleteManagedNodeVersion();
+      },
+      onPendingDeleteOpenChange: (open: boolean): void => {
+        if (!open && !deletingManagedNodeVersion) {
+          setPendingNodeVersionDelete(null);
+        }
+      },
+    }),
+    [
+      deletingManagedNodeVersion,
+      handleConfirmDeleteManagedNodeVersion,
+      handleInstallManagedNodeVersion,
+      handleRequestDeleteManagedNodeVersion,
+      handleSetManagedDefaultNodeVersion,
+      installingManagedNodeVersion,
+      isNodeVersionManagerDialogOpen,
+      isNodeVersionManagerLoading,
+      nodeVersionManagerSnapshot,
+      pendingNodeVersionDelete,
+      switchingManagedNodeVersion,
     ]
   );
 
@@ -922,6 +1254,7 @@ export function useProjectPanelController() {
     page,
     nodeVersionSyncCard,
     fnmSetupDialog,
+    nodeVersionManagerDialog,
     projectFormDialog,
     nodeInstallDialog,
     nodeRetryDialog,

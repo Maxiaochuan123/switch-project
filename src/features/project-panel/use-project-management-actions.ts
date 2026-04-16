@@ -11,11 +11,14 @@ import type {
 type UseProjectManagementActionsOptions = {
   deleteTarget: ProjectConfig | null;
   getProjectById: (projectId: string) => ProjectConfig | undefined;
+  clearDraftProjectGroups: () => void;
   handleProjectDialogOpenChange: (open: boolean) => void;
   loadProjectData: () => Promise<void>;
+  pendingProjectGroups: { id: string; name: string }[];
   projects: ProjectConfig[];
   refreshProjectDiagnosis: (projectId: string) => void;
   runtimes: Record<string, ProjectRuntime>;
+  setActiveGroupTab?: (groupId: string) => void;
   setDeleteTarget: Dispatch<SetStateAction<ProjectConfig | null>>;
   setFeedback: Dispatch<SetStateAction<Feedback | null>>;
   setFormError: Dispatch<SetStateAction<string | null>>;
@@ -27,11 +30,14 @@ type UseProjectManagementActionsOptions = {
 export function useProjectManagementActions({
   deleteTarget,
   getProjectById,
+  clearDraftProjectGroups,
   handleProjectDialogOpenChange,
   loadProjectData,
+  pendingProjectGroups,
   projects,
   refreshProjectDiagnosis,
   runtimes,
+  setActiveGroupTab,
   setDeleteTarget,
   setFeedback,
   setFormError,
@@ -96,11 +102,20 @@ export function useProjectManagementActions({
       setFormError(null);
 
       try {
+        let resolvedGroupId = draft.groupId;
+        let createdGroupId: string | null = null;
+        const pendingGroup = pendingProjectGroups.find((group) => group.id === draft.groupId);
+        if (pendingGroup) {
+          const createdGroup = await desktopApi.createProjectGroup(pendingGroup.name);
+          resolvedGroupId = createdGroup.id;
+          createdGroupId = createdGroup.id;
+        }
+
         const nextProject: ProjectConfig = {
           id: draft.id ?? crypto.randomUUID(),
           name: draft.name,
           path: draft.path,
-          groupId: draft.groupId,
+          groupId: resolvedGroupId,
           nodeVersion: draft.nodeVersion,
           packageManager: draft.packageManager as ProjectPackageManager,
           startCommand: draft.startCommand,
@@ -110,7 +125,11 @@ export function useProjectManagementActions({
 
         await desktopApi.saveProject(nextProject);
         await loadProjectData();
+        if (createdGroupId) {
+          setActiveGroupTab?.(createdGroupId);
+        }
         refreshProjectDiagnosis(nextProject.id);
+        clearDraftProjectGroups();
         handleProjectDialogOpenChange(false);
         setFeedback(null);
       } catch (error) {
@@ -120,13 +139,16 @@ export function useProjectManagementActions({
       }
     },
     [
+      clearDraftProjectGroups,
       getProjectById,
       handleProjectDialogOpenChange,
       loadProjectData,
       normalizeProjectPath,
+      pendingProjectGroups,
       projects,
       refreshProjectDiagnosis,
       runtimes,
+      setActiveGroupTab,
       setFeedback,
       setFormError,
     ]

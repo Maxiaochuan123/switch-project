@@ -2,11 +2,17 @@ use tauri::{AppHandle, State};
 use tauri_plugin_opener::OpenerExt;
 
 use crate::{
-    contracts::{AppStartupSettings, DesktopEnvironment, NodeManagerInstallResult},
+    contracts::{
+        normalize_node_version, AppStartupSettings, DesktopEnvironment, NodeManagerInstallResult,
+        NodeVersionManagerSnapshot, NodeVersionUsageProject,
+    },
     lock_error,
     node_manager::{
-        clear_node_manager_cache, install_node_manager as install_node_manager_impl,
-        install_node_version as install_node_version_impl,
+        clear_node_manager_cache, delete_node_version as delete_node_version_impl,
+        install_node_manager as install_node_manager_impl,
+        install_node_version as install_node_version_impl, list_latest_lts_node_versions,
+        resolve_active_node_version, resolve_default_node_version,
+        set_default_node_version as set_default_node_version_impl,
     },
     runtime::{
         clear_command_resolution_cache, open_project_terminal as open_project_terminal_window,
@@ -38,6 +44,56 @@ pub async fn install_node_version(version: String) -> Result<(), String> {
     clear_node_manager_cache();
     clear_command_resolution_cache();
     Ok(())
+}
+
+#[tauri::command]
+pub async fn delete_node_version(version: String) -> Result<(), String> {
+    delete_node_version_impl(&version).await?;
+    clear_node_manager_cache();
+    clear_command_resolution_cache();
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn set_default_node_version(version: String) -> Result<(), String> {
+    set_default_node_version_impl(&version).await?;
+    clear_node_manager_cache();
+    clear_command_resolution_cache();
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn get_node_version_manager_snapshot(
+    state: State<'_, ManagedState>,
+) -> Result<NodeVersionManagerSnapshot, String> {
+    let projects = state.store.lock().map_err(lock_error)?.list_projects();
+    let mut usage_by_version = std::collections::HashMap::new();
+
+    for project in projects {
+        let normalized_version = normalize_node_version(&project.node_version);
+        if normalized_version.is_empty() {
+            continue;
+        }
+
+        usage_by_version
+            .entry(normalized_version)
+            .or_insert_with(Vec::new)
+            .push(NodeVersionUsageProject {
+                project_id: project.id,
+                project_name: project.name,
+            });
+    }
+
+    let latest_lts_versions_result = list_latest_lts_node_versions().await;
+
+    Ok(NodeVersionManagerSnapshot {
+        installed_versions: crate::node_manager::list_installed_node_versions(),
+        latest_lts_versions: latest_lts_versions_result.clone().unwrap_or_default(),
+        latest_lts_error: latest_lts_versions_result.err(),
+        active_node_version: resolve_active_node_version(),
+        default_node_version: resolve_default_node_version(),
+        usage_by_version,
+    })
 }
 
 #[tauri::command]

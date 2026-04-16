@@ -1,6 +1,16 @@
 import { lazy, Suspense, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Download, Pencil, Plus, Settings, Settings2, Trash2, Upload } from "lucide-react";
+import {
+  Download,
+  LoaderCircle,
+  Pencil,
+  Plus,
+  Settings,
+  Settings2,
+  Trash2,
+  Upload,
+  Wrench,
+} from "lucide-react";
 import { AssignProjectsToGroupDialog } from "@/components/assign-projects-to-group-dialog";
 import { ConfirmProjectGroupReassignDialog } from "@/components/confirm-project-group-reassign-dialog";
 import { DeleteProjectGroupDialog } from "@/components/delete-project-group-dialog";
@@ -53,6 +63,12 @@ const StartupSettingsDialog = lazy(() =>
   }))
 );
 
+const NodeVersionManagerDialog = lazy(() =>
+  import("@/components/node-version-manager-dialog").then((module) => ({
+    default: module.NodeVersionManagerDialog,
+  }))
+);
+
 const DeleteProjectDialog = lazy(() =>
   import("@/components/delete-project-dialog").then((module) => ({
     default: module.DeleteProjectDialog,
@@ -75,6 +91,8 @@ export function ProjectPanelScreen() {
   const controller = useProjectPanelController();
   const selectedManagedGroup = controller.page.selectedManagedGroup;
   const [isSettingsDrawerOpen, setIsSettingsDrawerOpen] = useState(false);
+  const isImportingProjects = controller.page.isActionLocked("import-projects");
+  const isExportingProjects = controller.page.isActionLocked("export-projects");
 
   return (
     <TooltipProvider>
@@ -82,102 +100,125 @@ export function ProjectPanelScreen() {
       <div className="min-h-screen px-4 py-3 text-foreground">
         <div className="flex min-h-[calc(100vh-1.5rem)] w-full flex-col">
           <header className="flex items-start justify-between gap-4">
-            <ScrollArea
-              className="min-w-0 flex-1"
-              scrollbarOrientation="horizontal"
-            >
-              <div className="flex min-w-max items-center gap-2 pb-3">
-                {controller.page.groupTabs.map((tab) => {
-                  const isActive = controller.page.activeGroupTab === tab.key;
-                  const isManagedActive = selectedManagedGroup?.id === tab.key;
-
-                  return (
-                    <motion.button
-                      key={tab.key}
-                      type="button"
-                      layout
-                      transition={{ layout: { type: "spring", stiffness: 340, damping: 30 } }}
-                      className={`flex h-9 items-center gap-2 rounded-xl border px-3 text-sm transition-colors ${
-                        isActive
-                          ? "border-primary/30 bg-primary text-black"
-                          : "border-border/25 bg-white/5 text-muted-foreground hover:bg-white/10 hover:text-foreground"
-                      }`}
-                      onClick={() => controller.page.setActiveGroupTab(tab.key)}
-                    >
-                      <span className="whitespace-nowrap">{tab.name}</span>
-                      <span className="text-[11px] opacity-75">{tab.count}</span>
-                      <AnimatePresence initial={false}>
-                        {isManagedActive ? (
-                          <motion.span
-                            key="group-actions"
-                            layout
-                            initial={{ width: 0, opacity: 0 }}
-                            animate={{ width: "auto", opacity: 1 }}
-                            exit={{ width: 0, opacity: 0 }}
-                            transition={{ duration: 0.18, ease: "easeOut" }}
-                            className="ml-1 flex items-center gap-1 overflow-hidden border-l border-black/15 pl-2 text-black"
-                          >
-                            <button
-                              type="button"
-                              className="inline-flex h-6 items-center gap-1 rounded-md px-1.5 text-[12px] hover:bg-black/10"
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                void controller.page.runLockedAction(
-                                  `assign-projects:${selectedManagedGroup.id}`,
-                                  controller.page.handleOpenAssignProjectsDialog,
-                                  400
-                                );
-                              }}
-                              disabled={controller.page.isActionLocked(
-                                `assign-projects:${selectedManagedGroup.id}`
-                              )}
-                            >
-                              <Plus className="size-3.5" />
-                            </button>
-                            <button
-                              type="button"
-                              className="inline-flex size-6 items-center justify-center rounded-md hover:bg-black/10"
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                controller.page.handleRenameActiveGroup();
-                              }}
-                            >
-                              <Pencil className="size-3.5" />
-                            </button>
-                            <button
-                              type="button"
-                              className="inline-flex size-6 items-center justify-center rounded-md hover:bg-black/10"
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                controller.page.handleDeleteActiveGroup();
-                              }}
-                            >
-                              <Trash2 className="size-3.5" />
-                            </button>
-                          </motion.span>
-                        ) : null}
-                      </AnimatePresence>
-                    </motion.button>
-                  );
-                })}
-                <Button
-                  type="button"
-                  size="icon-sm"
-                  variant="ghost"
-                  className="rounded-xl text-primary hover:bg-primary/10 hover:text-primary"
-                  onClick={() =>
-                    void controller.page.runLockedAction(
-                      "open-create-group",
-                      controller.page.handleCreateGroup,
-                      400
-                    )
-                  }
-                  disabled={controller.page.isActionLocked("open-create-group")}
+            <div className="min-w-0 flex-1">
+              {controller.page.hasProjectGroups ? (
+                <ScrollArea
+                  className="min-w-0 flex-1"
+                  scrollbarOrientation="horizontal"
                 >
-                  <Plus className="size-4" />
-                </Button>
-              </div>
-            </ScrollArea>
+                  <div className="flex min-w-max items-center gap-2 pb-3">
+                    {controller.page.groupTabs.map((tab) => {
+                      const isActive = controller.page.activeGroupTab === tab.key;
+                      const isManagedActive = selectedManagedGroup?.id === tab.key;
+
+                      return (
+                        <motion.button
+                          key={tab.key}
+                          type="button"
+                          layout
+                          transition={{ layout: { type: "spring", stiffness: 340, damping: 30 } }}
+                          className={`flex h-9 items-center gap-2 rounded-xl border px-3 text-sm transition-colors ${
+                            isActive
+                              ? "border-primary/30 bg-primary text-black"
+                              : "border-border/25 bg-white/5 text-muted-foreground hover:bg-white/10 hover:text-foreground"
+                          }`}
+                          onClick={() => controller.page.setActiveGroupTab(tab.key)}
+                        >
+                          <span className="whitespace-nowrap">{tab.name}</span>
+                          <span className="text-[11px] opacity-75">{tab.count}</span>
+                          <AnimatePresence initial={false}>
+                            {isManagedActive ? (
+                              <motion.span
+                                key="group-actions"
+                                layout
+                                initial={{ width: 0, opacity: 0 }}
+                                animate={{ width: "auto", opacity: 1 }}
+                                exit={{ width: 0, opacity: 0 }}
+                                transition={{ duration: 0.18, ease: "easeOut" }}
+                                className="ml-1 flex items-center gap-1 overflow-hidden border-l border-black/15 pl-2 text-black"
+                              >
+                                <button
+                                  type="button"
+                                  className="inline-flex h-6 items-center gap-1 rounded-md px-1.5 text-[12px] hover:bg-black/10"
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    void controller.page.runLockedAction(
+                                      `assign-projects:${selectedManagedGroup.id}`,
+                                      controller.page.handleOpenAssignProjectsDialog,
+                                      400
+                                    );
+                                  }}
+                                  disabled={controller.page.isActionLocked(
+                                    `assign-projects:${selectedManagedGroup.id}`
+                                  )}
+                                >
+                                  <Plus className="size-3.5" />
+                                </button>
+                                <button
+                                  type="button"
+                                  className="inline-flex size-6 items-center justify-center rounded-md hover:bg-black/10"
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    controller.page.handleRenameActiveGroup();
+                                  }}
+                                >
+                                  <Pencil className="size-3.5" />
+                                </button>
+                                <button
+                                  type="button"
+                                  className="inline-flex size-6 items-center justify-center rounded-md hover:bg-black/10"
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    controller.page.handleDeleteActiveGroup();
+                                  }}
+                                >
+                                  <Trash2 className="size-3.5" />
+                                </button>
+                              </motion.span>
+                            ) : null}
+                          </AnimatePresence>
+                        </motion.button>
+                      );
+                    })}
+                    <Button
+                      type="button"
+                      size="icon-sm"
+                      variant="ghost"
+                      className="rounded-xl text-primary hover:bg-primary/10 hover:text-primary"
+                      onClick={() =>
+                        void controller.page.runLockedAction(
+                          "open-create-group",
+                          controller.page.handleCreateGroup,
+                          400
+                        )
+                      }
+                      disabled={controller.page.isActionLocked("open-create-group")}
+                    >
+                      <Plus className="size-4" />
+                    </Button>
+                  </div>
+                </ScrollArea>
+              ) : (
+                <div className="flex h-9 items-center">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    className="rounded-xl px-0 text-sm text-muted-foreground hover:bg-transparent hover:text-foreground"
+                    onClick={() =>
+                      void controller.page.runLockedAction(
+                        "open-create-group",
+                        controller.page.handleCreateGroup,
+                        400
+                      )
+                    }
+                    disabled={controller.page.isActionLocked("open-create-group")}
+                  >
+                    <Plus className="size-4" />
+                    创建分组
+                  </Button>
+                </div>
+              )}
+            </div>
 
             <div className="flex shrink-0 items-center gap-1.5">
               <Button
@@ -353,48 +394,74 @@ export function ProjectPanelScreen() {
           <DrawerHeader>
             <DrawerTitle>设置</DrawerTitle>
           </DrawerHeader>
-          <DrawerBody className="space-y-3">
-            <Button
-              type="button"
-              variant="outline"
-              className="w-full justify-start"
-              onClick={() => {
-                void controller.page.handleImportProjects();
-              }}
-              disabled={controller.page.isActionLocked("import-projects")}
-            >
-              <Upload className="size-4" />
-              恢复备份
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              className="w-full justify-start"
-              onClick={() => {
-                void controller.page.handleExportProjects();
-              }}
-              disabled={controller.page.isActionLocked("export-projects")}
-            >
-              <Download className="size-4" />
-              创建备份
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              className="w-full justify-start"
-              onClick={() => {
-                setIsSettingsDrawerOpen(false);
-                void controller.page.runLockedAction(
-                  "open-startup-settings",
-                  controller.page.openStartupSettingsDialog,
-                  400
-                );
-              }}
-              disabled={controller.page.isActionLocked("open-startup-settings")}
-            >
-              <Settings2 className="size-4" />
-              启动设置
-            </Button>
+          <DrawerBody className="flex min-h-[70vh] flex-col">
+            <div className="space-y-3">
+              <Button
+                type="button"
+                variant="outline"
+                className="w-full justify-start"
+                onClick={() => {
+                  setIsSettingsDrawerOpen(false);
+                  void controller.page.runLockedAction(
+                    "open-startup-settings",
+                    controller.page.openStartupSettingsDialog,
+                    400
+                  );
+                }}
+                disabled={controller.page.isActionLocked("open-startup-settings")}
+              >
+                <Settings2 className="size-4" />
+                启动设置
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                className="w-full justify-start"
+                onClick={() => {
+                  setIsSettingsDrawerOpen(false);
+                  controller.page.openNodeVersionManagerDialog();
+                }}
+              >
+                <Wrench className="size-4" />
+                Node 版本管理
+              </Button>
+            </div>
+
+            <div className="mt-auto space-y-3 pt-6">
+              <div className="border-t border-border/50" />
+              <Button
+                type="button"
+                variant="outline"
+                className="w-full justify-start"
+                onClick={() => {
+                  void controller.page.handleImportProjects();
+                }}
+                disabled={isImportingProjects}
+              >
+                {isImportingProjects ? (
+                  <LoaderCircle className="size-4 animate-spin" />
+                ) : (
+                  <Upload className="size-4" />
+                )}
+                {isImportingProjects ? "恢复中..." : "恢复备份"}
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                className="w-full justify-start"
+                onClick={() => {
+                  void controller.page.handleExportProjects();
+                }}
+                disabled={isExportingProjects}
+              >
+                {isExportingProjects ? (
+                  <LoaderCircle className="size-4 animate-spin" />
+                ) : (
+                  <Download className="size-4" />
+                )}
+                {isExportingProjects ? "创建中..." : "创建备份"}
+              </Button>
+            </div>
           </DrawerBody>
         </DrawerContent>
       </Drawer>
@@ -423,6 +490,7 @@ export function ProjectPanelScreen() {
             installedNodeVersions={controller.projectFormDialog.installedNodeVersions}
             nvmInstalledNodeVersions={controller.projectFormDialog.nvmInstalledNodeVersions}
             activeNodeVersion={controller.projectFormDialog.activeNodeVersion}
+            defaultNodeVersion={controller.projectFormDialog.defaultNodeVersion}
             installedPackageManagers={controller.projectFormDialog.installedPackageManagers}
             isSubmitting={controller.projectFormDialog.isSubmitting}
             isInspectingProject={controller.projectFormDialog.isInspectingProject}
@@ -477,6 +545,30 @@ export function ProjectPanelScreen() {
             onSettingsChange={controller.startupSettingsDialog.onSettingsChange}
             onOpenChange={controller.startupSettingsDialog.onOpenChange}
             onSubmit={() => void controller.startupSettingsDialog.onSubmit()}
+          />
+        ) : null}
+
+        {controller.nodeVersionManagerDialog.open ? (
+          <NodeVersionManagerDialog
+            open={controller.nodeVersionManagerDialog.open}
+            isLoading={controller.nodeVersionManagerDialog.isLoading}
+            installedVersions={controller.nodeVersionManagerDialog.installedVersions}
+            latestLtsVersions={controller.nodeVersionManagerDialog.latestLtsVersions}
+            latestLtsError={controller.nodeVersionManagerDialog.latestLtsError}
+            activeNodeVersion={controller.nodeVersionManagerDialog.activeNodeVersion}
+            defaultNodeVersion={controller.nodeVersionManagerDialog.defaultNodeVersion}
+            usageByVersion={controller.nodeVersionManagerDialog.usageByVersion}
+            installingVersion={controller.nodeVersionManagerDialog.installingVersion}
+            deletingVersion={controller.nodeVersionManagerDialog.deletingVersion}
+            switchingVersion={controller.nodeVersionManagerDialog.switchingVersion}
+            pendingDeleteVersion={controller.nodeVersionManagerDialog.pendingDeleteVersion}
+            pendingDeleteProjects={controller.nodeVersionManagerDialog.pendingDeleteProjects}
+            onOpenChange={controller.nodeVersionManagerDialog.onOpenChange}
+            onInstall={controller.nodeVersionManagerDialog.onInstall}
+            onSwitchDefault={controller.nodeVersionManagerDialog.onSwitchDefault}
+            onRequestDelete={controller.nodeVersionManagerDialog.onRequestDelete}
+            onConfirmDelete={controller.nodeVersionManagerDialog.onConfirmDelete}
+            onPendingDeleteOpenChange={controller.nodeVersionManagerDialog.onPendingDeleteOpenChange}
           />
         ) : null}
 

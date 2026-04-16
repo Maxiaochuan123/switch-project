@@ -4,6 +4,7 @@ import type {
   DesktopEnvironment,
   ImportProjectsResult,
   NodeManagerInstallResult,
+  NodeVersionManagerSnapshot,
   OperationEvent,
   ProjectConfig,
   ProjectDiagnosis,
@@ -75,6 +76,9 @@ export type DesktopApi = {
   exportProjects: (filePath: string) => Promise<void>;
   installNodeManager: () => Promise<NodeManagerInstallResult>;
   installNodeVersion: (version: string) => Promise<void>;
+  deleteNodeVersion: (version: string) => Promise<void>;
+  setDefaultNodeVersion: (version: string) => Promise<void>;
+  getNodeVersionManagerSnapshot: () => Promise<NodeVersionManagerSnapshot>;
   minimizeAppToTray: () => Promise<void>;
   ensureDeleteTool: () => Promise<boolean>;
   deleteProjectNodeModules: (projectId: string) => Promise<void>;

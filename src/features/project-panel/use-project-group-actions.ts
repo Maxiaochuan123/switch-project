@@ -32,6 +32,7 @@ export function useProjectGroupActions({
 }: UseProjectGroupActionsOptions) {
   const [projectGroupDialogError, setProjectGroupDialogError] = useState<string | null>(null);
   const [assignCreatedGroupToDraft, setAssignCreatedGroupToDraft] = useState(false);
+  const [draftProjectGroups, setDraftProjectGroups] = useState<ProjectGroup[]>([]);
 
   const openCreateProjectGroupDialog = useCallback((assignToDraft = false) => {
     setAssignCreatedGroupToDraft(assignToDraft);
@@ -63,6 +64,24 @@ export function useProjectGroupActions({
 
       try {
         const trimmedName = name.trim();
+        if (assignCreatedGroupToDraft && !draft?.id) {
+          const nextDraftGroup: ProjectGroup = {
+            id: `draft-group:${crypto.randomUUID()}`,
+            name: trimmedName,
+            order: projectGroups.length + draftProjectGroups.length,
+          };
+
+          setDraftProjectGroups((current) => [...current, nextDraftGroup]);
+          setProjectDraft((current) => ({
+            ...current,
+            groupId: nextDraftGroup.id,
+          }));
+          setProjectGroupDraft(null);
+          setAssignCreatedGroupToDraft(false);
+          setFeedback(null);
+          return;
+        }
+
         const nextGroup = draft?.id
           ? await desktopApi.updateProjectGroup({
               id: draft.id,
@@ -92,8 +111,10 @@ export function useProjectGroupActions({
     },
     [
       assignCreatedGroupToDraft,
+      draftProjectGroups.length,
       loadProjectData,
       projectGroups,
+      setDraftProjectGroups,
       setFeedback,
       setIsSubmittingProjectGroup,
       setProjectDraft,
@@ -175,6 +196,8 @@ export function useProjectGroupActions({
   );
 
   return {
+    clearDraftProjectGroups: (): void => setDraftProjectGroups([]),
+    draftProjectGroups,
     handleDeleteProjectGroup,
     handleMoveProjectGroup,
     handleProjectGroupDialogOpenChange,

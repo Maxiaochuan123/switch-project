@@ -7,6 +7,7 @@ import {
   type DesktopEnvironment,
   type ImportProjectsResult,
   type NodeManagerInstallResult,
+  type NodeVersionManagerSnapshot,
   type ProjectConfig,
   type ProjectDiagnosis,
   type ProjectDirectoryInspection,
@@ -88,6 +89,10 @@ export const desktopCommands: Omit<
   installNodeManager: () =>
     invokeCommand<NodeManagerInstallResult>("install_node_manager"),
   installNodeVersion: (version) => invokeCommand("install_node_version", { version }),
+  deleteNodeVersion: (version) => invokeCommand("delete_node_version", { version }),
+  setDefaultNodeVersion: (version) => invokeCommand("set_default_node_version", { version }),
+  getNodeVersionManagerSnapshot: () =>
+    invokeCommand<NodeVersionManagerSnapshot>("get_node_version_manager_snapshot"),
   minimizeAppToTray: () => invokeCommand("minimize_app_to_tray"),
   ensureDeleteTool: () => invokeCommand<boolean>("ensure_delete_tool"),
   deleteProjectNodeModules: (projectId) =>

@@ -1,4 +1,4 @@
-use std::{fs, path::PathBuf};
+use std::{collections::HashMap, fs, path::PathBuf};
 
 use serde::{Deserialize, Serialize};
 use ts_rs::{Config as TsConfig, TS};
@@ -176,11 +176,37 @@ pub struct DesktopEnvironment {
     #[serde(default)]
     pub nvm_installed_node_versions: Vec<String>,
     pub active_node_version: Option<String>,
+    pub default_node_version: Option<String>,
     pub available_package_managers: Vec<ProjectPackageManager>,
     pub rimraf_installed: bool,
     pub node_manager: NodeManagerKind,
     pub node_manager_available: bool,
     pub node_manager_version: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct NodeVersionUsageProject {
+    pub project_id: String,
+    pub project_name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(optional_fields)]
+pub struct NodeVersionManagerSnapshot {
+    #[serde(default)]
+    pub installed_versions: Vec<String>,
+    #[serde(default)]
+    pub latest_lts_versions: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub latest_lts_error: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub active_node_version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub default_node_version: Option<String>,
+    #[serde(default)]
+    pub usage_by_version: HashMap<String, Vec<NodeVersionUsageProject>>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, TS)]
@@ -439,6 +465,8 @@ fn build_typescript_contracts() -> String {
     push_typescript_declaration::<NodeManagerInstallAttempt>(&mut sections, &config);
     push_typescript_declaration::<NodeManagerInstallResult>(&mut sections, &config);
     push_typescript_declaration::<DesktopEnvironment>(&mut sections, &config);
+    push_typescript_declaration::<NodeVersionUsageProject>(&mut sections, &config);
+    push_typescript_declaration::<NodeVersionManagerSnapshot>(&mut sections, &config);
     push_typescript_declaration::<ProjectNodeVersionSource>(&mut sections, &config);
     push_typescript_declaration::<ProjectCommandSuggestion>(&mut sections, &config);
     push_typescript_declaration::<ProjectReadiness>(&mut sections, &config);
