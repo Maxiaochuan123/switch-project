@@ -13,7 +13,7 @@
   --popover: #101010;
   --popover-foreground: #f2f2f2;
 
-  /* VoltAgent Signal Green */
+  /* Current Signal Green */
   --primary: 156 100% 43%; 
   --primary-foreground: 0 0% 0%;
   
@@ -23,7 +23,7 @@
   --muted: #1e1d1d;
   --muted-foreground: #8b949e;
   
-  /* VoltAgent Mint for text emphasis */
+  /* Current Mint for text emphasis */
   --accent: 161 70% 51%;
   --accent-foreground: 0 0% 0%;
 

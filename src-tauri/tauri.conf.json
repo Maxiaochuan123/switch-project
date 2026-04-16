@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "前端项目启动面板",
+  "productName": "Current",
   "version": "2.0.0",
-  "identifier": "com.codex.switch-project-panel",
+  "identifier": "com.current.app",
   "build": {
     "beforeDevCommand": "node scripts/check-node-version.mjs && cargo run --quiet --manifest-path src-tauri/Cargo.toml --bin export-contracts && vite --port 1420",
     "beforeBuildCommand": "node scripts/check-node-version.mjs && cargo run --quiet --manifest-path src-tauri/Cargo.toml --bin export-contracts && vite build",
@@ -13,7 +13,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "前端项目启动面板",
+        "title": "Current",
         "width": 1280,
         "height": 860,
         "minWidth": 980,

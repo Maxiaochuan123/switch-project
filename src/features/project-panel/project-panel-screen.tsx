@@ -277,7 +277,7 @@ export function ProjectPanelScreen() {
                       构建你的项目空间
                     </h2>
                     <p className="text-xl text-muted-foreground/60 leading-relaxed">
-                      VoltAgent 将助你高效管理启动前端项目。<br />
+                      Current 将助你高效管理启动前端项目。<br />
                       将项目文件夹拖入下方，即可开启沉浸式开发体验。
                     </p>
                   </div>

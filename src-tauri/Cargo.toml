@@ -1,8 +1,8 @@
 [package]
 name = "switch-project-panel"
 version = "2.0.0"
-description = "前端项目启动面板"
-authors = ["Codex <codex@openai.com>"]
+description = "Current 是一款前端项目启动面板"
+authors = ["MXC <[maxiaochuansg@gmail.com]>"]
 edition = "2021"
 default-run = "switch-project-panel"
 
