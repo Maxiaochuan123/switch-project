@@ -25,6 +25,8 @@ tauri = { version = "2.10.3", features = ["tray-icon"] }
 tauri-plugin-autostart = "2.5.1"
 tauri-plugin-dialog = "2.7.0"
 tauri-plugin-opener = "2.5.3"
+tauri-plugin-process = "2.3.1"
+tauri-plugin-updater = "2.5.0"
 tokio = { version = "1.48.0", features = ["io-util", "macros", "process", "rt-multi-thread", "sync", "time"] }
 ts-rs = "12.0.1"
 url = "2.5.7"

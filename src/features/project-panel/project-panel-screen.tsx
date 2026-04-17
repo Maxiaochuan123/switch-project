@@ -8,6 +8,8 @@ import {
   Settings2,
   Upload,
   Wrench,
+  RefreshCw,
+  Info,
 } from "lucide-react";
 import { AssignProjectsToGroupDialog } from "@/components/assign-projects-to-group-dialog";
 import { ConfirmProjectGroupReassignDialog } from "@/components/confirm-project-group-reassign-dialog";
@@ -28,6 +30,9 @@ import {
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { useUpdater } from "@/lib/updater";
+import { version } from "../../../package.json";
+import { cn } from "@/lib/utils";
 import {
   ProjectGroupTabsDnd,
   SortableProjectCardsGrid,
@@ -97,6 +102,8 @@ export function ProjectPanelScreen() {
   const isAssignProjectsLocked = selectedManagedGroup
     ? controller.page.isActionLocked(`assign-projects:${selectedManagedGroup.id}`)
     : false;
+
+  const { status, progress, checkForUpdates, downloadAndInstall } = useUpdater();
 
   return (
     <TooltipProvider>
@@ -299,7 +306,7 @@ export function ProjectPanelScreen() {
           <DrawerHeader>
             <DrawerTitle>设置</DrawerTitle>
           </DrawerHeader>
-          <DrawerBody className="flex min-h-[70vh] flex-col">
+          <DrawerBody className="flex min-h-[50vh] flex-col">
             <div className="space-y-3">
               <Button
                 type="button"
@@ -332,8 +339,7 @@ export function ProjectPanelScreen() {
               </Button>
             </div>
 
-            <div className="mt-auto space-y-3 pt-6">
-              <div className="border-t border-border/50" />
+            <div className="mt-auto space-y-3">
               <Button
                 type="button"
                 variant="outline"
@@ -366,6 +372,69 @@ export function ProjectPanelScreen() {
                 )}
                 {isExportingProjects ? "创建中..." : "创建备份"}
               </Button>
+
+              <div className="border-t border-border/50 py-1" />
+
+              <div className="flex items-center justify-between gap-4 rounded-xl border border-border/30 bg-black/20 p-3 backdrop-blur-md">
+                <div className="flex min-w-0 flex-1 items-center gap-2.5">
+                  <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary/10">
+                    <Info className="size-4 text-primary" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-sm font-semibold text-foreground">Current</span>
+                      <span className="text-[10px] font-medium text-muted-foreground uppercase opacity-50">Beta</span>
+                    </div>
+                    <div className="text-xs text-muted-foreground">版本 v{version}</div>
+                  </div>
+                </div>
+
+                <div className="flex shrink-0 items-center gap-2">
+                  {(status === "idle" || status === "checking" || status === "up-to-date" || status === "error") ? (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 px-2.5 text-xs font-medium hover:bg-primary/10 hover:text-primary transition-all active:scale-95"
+                      onClick={() => void checkForUpdates()}
+                      disabled={status === "checking"}
+                    >
+                      <RefreshCw className={cn("mr-1.5 size-3", status === "checking" && "animate-spin")} />
+                      {status === "checking" ? "检查中" : "检查更新"}
+                    </Button>
+                  ) : status === "available" ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      className="h-8 px-3 text-xs font-bold shadow-lg shadow-primary/20 hover:shadow-primary/30 active:scale-95"
+                      onClick={() => void downloadAndInstall()}
+                    >
+                      <Download className="mr-1.5 size-3" />
+                      立即更新
+                    </Button>
+                  ) : null}
+                </div>
+              </div>
+
+              {status === "downloading" && (
+                <div className="px-1 space-y-2 animate-in fade-in slide-in-from-bottom-1 duration-300">
+                  <div className="flex justify-between items-center text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+                    <span className="flex items-center gap-1.5">
+                      <div className="size-1 rounded-full bg-primary animate-pulse" />
+                      正在下载更新...
+                    </span>
+                    <span>{progress}%</span>
+                  </div>
+                  <div className="h-1 w-full overflow-hidden rounded-full bg-primary/10">
+                    <motion.div
+                      className="h-full bg-primary"
+                      initial={{ width: 0 }}
+                      animate={{ width: `${progress}%` }}
+                      transition={{ type: "spring", bounce: 0, duration: 0.5 }}
+                    />
+                  </div>
+                </div>
+              )}
             </div>
           </DrawerBody>
         </DrawerContent>

@@ -43,6 +43,8 @@ pub fn run() {
         )
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .manage(ManagedState {
             store: Mutex::new(AppStore::load().expect("failed to load app store")),
             runtime_manager: RuntimeManager::new(),
