@@ -13,6 +13,7 @@
     "preweb:build": "node scripts/check-node-version.mjs && cargo run --quiet --manifest-path src-tauri/Cargo.toml --bin export-contracts",
     "web:build": "vite build",
     "build": "tauri build",
+    "vercel-build": "vite build",
     "prelint": "cargo run --quiet --manifest-path src-tauri/Cargo.toml --bin export-contracts",
     "lint": "eslint --ext .ts,.tsx .",
     "icon:generate": "node scripts/generate-icon.mjs",
