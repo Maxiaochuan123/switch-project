@@ -3,11 +3,9 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   Download,
   LoaderCircle,
-  Pencil,
   Plus,
   Settings,
   Settings2,
-  Trash2,
   Upload,
   Wrench,
 } from "lucide-react";
@@ -17,7 +15,6 @@ import { DeleteProjectGroupDialog } from "@/components/delete-project-group-dial
 import { DropzoneField } from "@/components/dropzone-field";
 import { MoveProjectGroupDialog } from "@/components/move-project-group-dialog";
 import { NodeVersionSyncCard } from "@/components/node-version-sync-card";
-import { ProjectCard } from "@/components/project-card";
 import { ProjectGroupDialog } from "@/components/project-group-dialog";
 import { ProjectGlobalDropzone } from "@/components/project-global-dropzone";
 import { Button } from "@/components/ui/button";
@@ -31,6 +28,10 @@ import {
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import {
+  ProjectGroupTabsDnd,
+  SortableProjectCardsGrid,
+} from "./project-panel-sortable";
 import { useProjectPanelController } from "./use-project-panel-controller";
 
 const ProjectFormDialog = lazy(() =>
@@ -93,93 +94,39 @@ export function ProjectPanelScreen() {
   const [isSettingsDrawerOpen, setIsSettingsDrawerOpen] = useState(false);
   const isImportingProjects = controller.page.isActionLocked("import-projects");
   const isExportingProjects = controller.page.isActionLocked("export-projects");
+  const isAssignProjectsLocked = selectedManagedGroup
+    ? controller.page.isActionLocked(`assign-projects:${selectedManagedGroup.id}`)
+    : false;
 
   return (
     <TooltipProvider>
       <ProjectGlobalDropzone onPathSelected={controller.projectFormDialog.onPathSelected} />
       <div className="min-h-screen px-4 py-3 text-foreground">
         <div className="flex min-h-[calc(100vh-1.5rem)] w-full flex-col">
-          <header className="flex items-start justify-between gap-4">
+          <header className="flex items-center justify-between gap-4">
             <div className="min-w-0 flex-1">
               {controller.page.hasProjectGroups ? (
                 <ScrollArea
                   className="min-w-0 flex-1"
                   scrollbarOrientation="horizontal"
                 >
-                  <div className="flex min-w-max items-center gap-2 pb-3">
-                    {controller.page.groupTabs.map((tab) => {
-                      const isActive = controller.page.activeGroupTab === tab.key;
-                      const isManagedActive = selectedManagedGroup?.id === tab.key;
-
-                      return (
-                        <motion.button
-                          key={tab.key}
-                          type="button"
-                          layout
-                          transition={{ layout: { type: "spring", stiffness: 340, damping: 30 } }}
-                          className={`flex h-9 items-center gap-2 rounded-xl border px-3 text-sm transition-colors ${
-                            isActive
-                              ? "border-primary/30 bg-primary text-black"
-                              : "border-border/25 bg-white/5 text-muted-foreground hover:bg-white/10 hover:text-foreground"
-                          }`}
-                          onClick={() => controller.page.setActiveGroupTab(tab.key)}
-                        >
-                          <span className="whitespace-nowrap">{tab.name}</span>
-                          <span className="text-[11px] opacity-75">{tab.count}</span>
-                          <AnimatePresence initial={false}>
-                            {isManagedActive ? (
-                              <motion.span
-                                key="group-actions"
-                                layout
-                                initial={{ width: 0, opacity: 0 }}
-                                animate={{ width: "auto", opacity: 1 }}
-                                exit={{ width: 0, opacity: 0 }}
-                                transition={{ duration: 0.18, ease: "easeOut" }}
-                                className="ml-1 flex items-center gap-1 overflow-hidden border-l border-black/15 pl-2 text-black"
-                              >
-                                <button
-                                  type="button"
-                                  className="inline-flex h-6 items-center gap-1 rounded-md px-1.5 text-[12px] hover:bg-black/10"
-                                  onClick={(event) => {
-                                    event.stopPropagation();
-                                    void controller.page.runLockedAction(
-                                      `assign-projects:${selectedManagedGroup.id}`,
-                                      controller.page.handleOpenAssignProjectsDialog,
-                                      400
-                                    );
-                                  }}
-                                  disabled={controller.page.isActionLocked(
-                                    `assign-projects:${selectedManagedGroup.id}`
-                                  )}
-                                >
-                                  <Plus className="size-3.5" />
-                                </button>
-                                <button
-                                  type="button"
-                                  className="inline-flex size-6 items-center justify-center rounded-md hover:bg-black/10"
-                                  onClick={(event) => {
-                                    event.stopPropagation();
-                                    controller.page.handleRenameActiveGroup();
-                                  }}
-                                >
-                                  <Pencil className="size-3.5" />
-                                </button>
-                                <button
-                                  type="button"
-                                  className="inline-flex size-6 items-center justify-center rounded-md hover:bg-black/10"
-                                  onClick={(event) => {
-                                    event.stopPropagation();
-                                    controller.page.handleDeleteActiveGroup();
-                                  }}
-                                >
-                                  <Trash2 className="size-3.5" />
-                                </button>
-                              </motion.span>
-                            ) : null}
-                          </AnimatePresence>
-                        </motion.button>
-                      );
-                    })}
+                  <div className="flex min-w-max items-center gap-2">
+                    <ProjectGroupTabsDnd
+                      activeKey={controller.page.activeGroupTab}
+                      groupTabs={controller.page.groupTabs}
+                      isAssignLocked={isAssignProjectsLocked}
+                      onAssignProjects={() =>
+                        void controller.page.runLockedAction(
+                          `assign-projects:${selectedManagedGroup?.id ?? "none"}`,
+                          controller.page.handleOpenAssignProjectsDialog,
+                          400
+                        )
+                      }
+                      onDeleteGroup={controller.page.handleDeleteActiveGroup}
+                      onRenameGroup={controller.page.handleRenameActiveGroup}
+                      onReorder={controller.page.handleReorderProjectGroups}
+                      onSelectTab={controller.page.setActiveGroupTab}
+                    />
                     <Button
                       type="button"
                       size="icon-sm"
@@ -302,53 +249,11 @@ export function ProjectPanelScreen() {
                   className="space-y-3 p-1.5"
                 >
                   {controller.page.visibleProjectCards.length > 0 ? (
-                    <div className="grid items-start grid-cols-[repeat(auto-fit,minmax(320px,390px))] gap-6">
-                      {controller.page.visibleProjectCards.map((card) => (
-                        <motion.div
-                          key={card.key}
-                          initial={{ opacity: 0, scale: 0.95 }}
-                          animate={{ opacity: 1, scale: 1 }}
-                          transition={{
-                            type: "spring",
-                            stiffness: 260,
-                            damping: 20,
-                          }}
-                        >
-                          <ProjectCard
-                            project={card.project}
-                            runtime={card.runtime}
-                            runtimeFailureMessage={card.runtimeFailureMessage}
-                            operationPanel={card.operationPanel}
-                            diagnosis={card.diagnosis}
-                            isDiagnosisPending={card.isDiagnosisPending}
-                            isStartPending={card.isStartPending}
-                            isStopPending={card.isStopPending}
-                            isStartLocked={card.isStartLocked}
-                            isStopLocked={card.isStopLocked}
-                            isEditLocked={card.isEditLocked}
-                            isDeleteLocked={card.isDeleteLocked}
-                            isDeleteNodeModulesLocked={card.isDeleteNodeModulesLocked}
-                            isReinstallNodeModulesLocked={card.isReinstallNodeModulesLocked}
-                            isTerminalLocked={card.isTerminalLocked}
-                            isDirectoryLocked={card.isDirectoryLocked}
-                            isAddressLocked={card.isAddressLocked}
-                            isMoveGroupLocked={card.isMoveGroupLocked}
-                            groupBadgeLabel={card.groupBadgeLabel}
-                            availableGroups={card.availableGroups}
-                            onEdit={card.onEdit}
-                            onDelete={card.onDelete}
-                            onDeleteNodeModules={card.onDeleteNodeModules}
-                            onReinstallNodeModules={card.onReinstallNodeModules}
-                            onOpenTerminalOutput={card.onOpenTerminalOutput}
-                            onStart={card.onStart}
-                            onStop={card.onStop}
-                            onOpenDirectory={card.onOpenDirectory}
-                            onOpenUrl={card.onOpenUrl}
-                            onOpenMoveGroupDialog={card.onOpenMoveGroupDialog}
-                          />
-                        </motion.div>
-                      ))}
-                    </div>
+                    <SortableProjectCardsGrid
+                      cards={controller.page.visibleProjectCards}
+                      onReorder={controller.page.handleReorderProjectsInSelectedGroup}
+                      sortableGroupId={selectedManagedGroup?.id ?? null}
+                    />
                   ) : selectedManagedGroup ? (
                     <div className="flex min-h-[320px] items-center justify-center rounded-xl border border-dashed border-border/40 bg-black/20 px-6 py-10">
                       <div className="max-w-md text-center">

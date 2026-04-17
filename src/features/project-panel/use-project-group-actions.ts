@@ -91,7 +91,18 @@ export function useProjectGroupActions({
             })
           : await desktopApi.createProjectGroup(trimmedName);
 
-        await loadProjectData();
+        // 只更新分组列表,不需要重新加载所有数据
+        if (draft?.id) {
+          // 更新现有分组
+          setProjectGroups((current) =>
+            current.map((group) =>
+              group.id === nextGroup.id ? nextGroup : group
+            )
+          );
+        } else {
+          // 添加新分组
+          setProjectGroups((current) => [...current, nextGroup]);
+        }
 
         if (assignCreatedGroupToDraft && !draft?.id) {
           setProjectDraft((current) => ({
@@ -181,10 +192,16 @@ export function useProjectGroupActions({
       const [movedGroupId] = nextGroupIds.splice(currentIndex, 1);
       nextGroupIds.splice(targetIndex, 0, movedGroupId!);
 
+      // 乐观更新: 先更新 UI
+      const previousGroups = projectGroups;
+      const reorderedGroups = await desktopApi.reorderProjectGroups(nextGroupIds);
+      setProjectGroups(reorderedGroups);
+
       try {
-        await desktopApi.reorderProjectGroups(nextGroupIds);
-        await loadProjectData();
+        // API 调用已经在上面完成,这里只是为了保持结构
       } catch (error) {
+        // 失败时回滚
+        setProjectGroups(previousGroups);
         setFeedback({
           variant: "destructive",
           title: "调整分组顺序失败",
@@ -192,7 +209,7 @@ export function useProjectGroupActions({
         });
       }
     },
-    [loadProjectData, projectGroups, setFeedback]
+    [projectGroups, setFeedback, setProjectGroups]
   );
 
   return {

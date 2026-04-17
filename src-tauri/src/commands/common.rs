@@ -702,6 +702,7 @@ mod tests {
             name: "Test Project".to_string(),
             path: path.to_string_lossy().to_string(),
             group_id: None,
+            order: 0,
             node_version: node_version.to_string(),
             package_manager: ProjectPackageManager::Npm,
             start_command: start_command.to_string(),

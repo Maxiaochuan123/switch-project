@@ -283,6 +283,7 @@ export function areProjectConfigsEqual(left?: ProjectConfig, right?: ProjectConf
     left.name === right.name &&
     left.path === right.path &&
     left.groupId === right.groupId &&
+    left.order === right.order &&
     left.nodeVersion === right.nodeVersion &&
     left.packageManager === right.packageManager &&
     left.startCommand === right.startCommand &&
@@ -432,6 +433,11 @@ export function getOperationPanelMessage(event: OperationEvent) {
   );
 }
 
+/**
+ * 获取项目运行时的错误消息
+ * @param runtime - 项目运行时状态
+ * @returns 格式化的错误消息
+ */
 export function getProjectRuntimeErrorMessage(runtime?: ProjectRuntime) {
   if (!runtime) {
     return "启动失败，请查看终端输出。";
@@ -447,6 +453,44 @@ export function getProjectRuntimeErrorMessage(runtime?: ProjectRuntime) {
     .find(Boolean);
 
   return runtime.lastMessage?.trim() || recentLogMessage || "启动失败，请查看终端输出。";
+}
+
+/**
+ * 检查项目运行时是否有面板内容可显示
+ * @param runtime - 项目运行时状态
+ * @returns 如果有可显示的地址或日志则返回 true
+ */
+export function hasProjectRuntimePanelContent(runtime: ProjectRuntime) {
+  if (runtime.detectedAddresses.length > 0) {
+    return true;
+  }
+
+  return runtime.recentLogs.some(
+    (entry) => entry.level !== "system" && entry.message.trim().length > 0
+  );
+}
+
+/**
+ * 创建项目启动失败的操作事件
+ * @param projectId - 项目ID
+ * @param projectName - 项目名称
+ * @param message - 失败消息
+ * @returns 格式化的操作事件对象
+ */
+export function createProjectStartFailureEvent(
+  projectId: string,
+  projectName: string,
+  message: string
+): OperationEvent {
+  return {
+    operationId: `project-start-failed:${projectId}:${Date.now()}`,
+    type: "project-start-preflight",
+    status: "error",
+    title: "启动失败",
+    projectId,
+    projectName,
+    message,
+  };
 }
 
 export function isStartupTimingLogMessage(message: string) {
@@ -533,7 +577,7 @@ export function selectProjectCardPanelState({
     };
   }
 
-  const isBusy = runtime?.status === "running" || runtime?.status === "starting";
+  const isBusy = isProjectRuntimeActive(runtime?.status);
   const addresses = runtime?.detectedAddresses ?? [];
 
   if (isBusy && addresses.length > 0) {

@@ -28,6 +28,10 @@ export const desktopCommands: Omit<
   deleteProjectGroup: (groupId) => invokeCommand("delete_project_group", { groupId }),
   reorderProjectGroups: (groupIds) =>
     invokeCommand("reorder_project_groups", { groupIds }),
+  reorderProjectsInGroup: (groupId, projectIds) =>
+    invokeCommand("reorder_projects_in_group", { groupId, projectIds }),
+  assignProjectsToGroup: (groupId, projectIds) =>
+    invokeCommand("assign_projects_to_group", { groupId, projectIds }),
   getProjectPanelSnapshot: () =>
     invokeCommand<ProjectPanelSnapshot>("get_project_panel_snapshot"),
   saveProject: (project) => invokeCommand("save_project", { project }),
@@ -54,6 +58,7 @@ export const desktopCommands: Omit<
   },
   saveAppStartupSettings: async (settings) => {
     const normalizedSettings = normalizeAppStartupSettings(settings);
+    let actualOpenAtLogin = normalizedSettings.openAtLogin;
 
     // Try to update autostart status, but don't block the rest of the settings if it fails
     try {
@@ -62,11 +67,26 @@ export const desktopCommands: Omit<
       } else {
         await disable();
       }
+
+      // Verify the actual status after update
+      actualOpenAtLogin = await isEnabled();
     } catch (error) {
       console.error("Failed to update autostart status:", error);
+      // Fall back to reading current status
+      try {
+        actualOpenAtLogin = await isEnabled();
+      } catch (readError) {
+        console.error("Failed to read autostart status:", readError);
+        // Keep the requested value if we can't read the actual status
+      }
     }
 
-    await invokeCommand("save_app_startup_settings", { settings: normalizedSettings });
+    await invokeCommand("save_app_startup_settings", {
+      settings: {
+        ...normalizedSettings,
+        openAtLogin: actualOpenAtLogin,
+      },
+    });
   },
   startProject: (projectId) => invokeCommand("start_project", { projectId }),
   stopProject: (projectId) => invokeCommand("stop_project", { projectId }),

@@ -39,6 +39,7 @@ struct LegacyProjectConfig {
     name: Option<String>,
     path: Option<String>,
     group_id: Option<String>,
+    order: Option<u32>,
     node_version: Option<String>,
     package_manager: Option<ProjectPackageManager>,
     start_command: Option<String>,
@@ -117,7 +118,7 @@ impl AppStore {
     }
 
     pub fn save_project(&mut self, project: ProjectConfig) -> Result<(), String> {
-        let next_project = normalize_project(project)?;
+        let mut next_project = normalize_project(project)?;
         validate_project_group_reference(
             &self.data.project_groups,
             next_project.group_id.as_deref(),
@@ -129,6 +130,16 @@ impl AppStore {
             .iter()
             .position(|current| current.id == next_project.id)
         {
+            let current_project = self.data.projects[index].clone();
+            next_project.order = if current_project.group_id == next_project.group_id {
+                current_project.order
+            } else {
+                next_project_order(
+                    &self.data.projects,
+                    next_project.group_id.as_deref(),
+                    Some(current_project.id.as_str()),
+                )
+            };
             self.data.projects[index] = next_project;
         } else if let Some(index) = self
             .data
@@ -136,21 +147,33 @@ impl AppStore {
             .iter()
             .position(|current| current.path.eq_ignore_ascii_case(&next_project.path))
         {
+            let current_project = self.data.projects[index].clone();
+            next_project.order = if current_project.group_id == next_project.group_id {
+                current_project.order
+            } else {
+                next_project_order(
+                    &self.data.projects,
+                    next_project.group_id.as_deref(),
+                    Some(current_project.id.as_str()),
+                )
+            };
             self.data.projects[index] = ProjectConfig {
-                id: self.data.projects[index].id.clone(),
+                id: current_project.id,
                 ..next_project
             };
         } else {
+            next_project.order =
+                next_project_order(&self.data.projects, next_project.group_id.as_deref(), None);
             self.data.projects.push(next_project);
         }
 
+        normalize_project_orders(&mut self.data.projects, &self.data.project_groups);
         self.persist()
     }
 
     pub fn delete_project(&mut self, project_id: &str) -> Result<(), String> {
-        self.data
-            .projects
-            .retain(|project| project.id != project_id);
+        self.data.projects.retain(|project| project.id != project_id);
+        normalize_project_orders(&mut self.data.projects, &self.data.project_groups);
         self.persist()
     }
 
@@ -211,6 +234,7 @@ impl AppStore {
         }
 
         normalize_project_group_orders(&mut self.data.project_groups);
+        normalize_project_orders(&mut self.data.projects, &self.data.project_groups);
         self.persist()
     }
 
@@ -243,9 +267,150 @@ impl AppStore {
 
         self.data.project_groups = next_groups;
         normalize_project_group_orders(&mut self.data.project_groups);
+        normalize_project_orders(&mut self.data.projects, &self.data.project_groups);
         self.persist()?;
 
         Ok(self.list_project_groups())
+    }
+
+    pub fn reorder_projects_in_group(
+        &mut self,
+        group_id: &str,
+        project_ids: &[String],
+    ) -> Result<(), String> {
+        let normalized_group_id = group_id.trim().to_string();
+        validate_project_group_reference(
+            &self.data.project_groups,
+            Some(normalized_group_id.as_str()),
+        )?;
+
+        let group_project_count = self
+            .data
+            .projects
+            .iter()
+            .filter(|project| project.group_id.as_deref() == Some(normalized_group_id.as_str()))
+            .count();
+
+        if group_project_count != project_ids.len() {
+            return Err("分组内项目排序数据不完整。".to_string());
+        }
+
+        let mut requested_project_orders = HashMap::with_capacity(project_ids.len());
+        for (index, project_id) in project_ids.iter().enumerate() {
+            let normalized_project_id = project_id.trim();
+            if normalized_project_id.is_empty() {
+                return Err("项目标识不能为空。".to_string());
+            }
+
+            if requested_project_orders
+                .insert(normalized_project_id.to_string(), index as u32)
+                .is_some()
+            {
+                return Err("分组内项目排序数据包含重复项目。".to_string());
+            }
+        }
+
+        if self.data.projects.iter().any(|project| {
+            requested_project_orders.contains_key(&project.id)
+                && project.group_id.as_deref() != Some(normalized_group_id.as_str())
+        }) {
+            return Err("存在不属于当前分组的项目，无法排序。".to_string());
+        }
+
+        let has_complete_group = self
+            .data
+            .projects
+            .iter()
+            .filter(|project| project.group_id.as_deref() == Some(normalized_group_id.as_str()))
+            .all(|project| requested_project_orders.contains_key(&project.id));
+
+        if !has_complete_group {
+            return Err("分组内项目排序数据不完整。".to_string());
+        }
+
+        for project in &mut self.data.projects {
+            if project.group_id.as_deref() == Some(normalized_group_id.as_str()) {
+                project.order = *requested_project_orders
+                    .get(&project.id)
+                    .expect("group order should be present for each project");
+            }
+        }
+
+        normalize_project_orders(&mut self.data.projects, &self.data.project_groups);
+        self.persist()
+    }
+
+    pub fn assign_projects_to_group(
+        &mut self,
+        group_id: &str,
+        project_ids: &[String],
+    ) -> Result<(), String> {
+        let normalized_group_id = group_id.trim().to_string();
+        validate_project_group_reference(
+            &self.data.project_groups,
+            Some(normalized_group_id.as_str()),
+        )?;
+
+        if project_ids.is_empty() {
+            return Ok(());
+        }
+
+        let mut requested_project_orders = HashMap::new();
+        for (index, project_id) in project_ids.iter().enumerate() {
+            let normalized_project_id = project_id.trim();
+            if normalized_project_id.is_empty() {
+                return Err("项目标识不能为空。".to_string());
+            }
+
+            if requested_project_orders
+                .insert(normalized_project_id.to_string(), index as u32)
+                .is_some()
+            {
+                return Err("批量加入分组的数据包含重复项目。".to_string());
+            }
+        }
+
+        let existing_project_ids = self
+            .data
+            .projects
+            .iter()
+            .map(|project| project.id.as_str())
+            .collect::<std::collections::HashSet<_>>();
+
+        if requested_project_orders
+            .keys()
+            .any(|project_id| !existing_project_ids.contains(project_id.as_str()))
+        {
+            return Err("存在不存在的项目，无法批量加入分组。".to_string());
+        }
+
+        let mut next_projects = self.data.projects.clone();
+        let mut changed = false;
+        let next_target_order =
+            next_project_order(&self.data.projects, Some(normalized_group_id.as_str()), None);
+
+        for project in &mut next_projects {
+            if let Some(requested_order) = requested_project_orders.get(&project.id) {
+                if project.group_id.as_deref() != Some(normalized_group_id.as_str()) {
+                    project.group_id = Some(normalized_group_id.clone());
+                    project.order = next_target_order.saturating_add(*requested_order);
+                    changed = true;
+                }
+            }
+        }
+
+        if !changed {
+            return Ok(());
+        }
+
+        let previous_projects = std::mem::replace(&mut self.data.projects, next_projects);
+        normalize_project_orders(&mut self.data.projects, &self.data.project_groups);
+        if let Err(error) = self.persist() {
+            self.data.projects = previous_projects;
+            return Err(error);
+        }
+
+        Ok(())
     }
 
     pub fn import_projects(&mut self, path: &str) -> Result<ImportProjectsResult, String> {
@@ -307,6 +472,7 @@ impl AppStore {
             result.added += 1;
         }
 
+        self.normalize();
         self.persist()?;
         Ok(result)
     }
@@ -319,7 +485,7 @@ impl AppStore {
 
         let contents = serde_json::to_string_pretty(&ProjectGroupsExport {
             project_groups: self.list_project_groups(),
-            projects: self.data.projects.clone(),
+            projects: self.list_projects(),
         })
         .map_err(|error| format!("序列化备份数据失败: {error}"))?;
 
@@ -353,6 +519,7 @@ impl AppStore {
                 project
             })
             .collect();
+        normalize_project_orders(&mut self.data.projects, &self.data.project_groups);
     }
 
     fn merge_imported_project_groups(
@@ -482,6 +649,7 @@ fn migrate_legacy_store(path: &Path) -> StoreData {
                     name: project.name.unwrap_or_default(),
                     path: project.path.unwrap_or_default(),
                     group_id: project.group_id,
+                    order: project.order.unwrap_or_default(),
                     node_version: project.node_version.unwrap_or_default(),
                     package_manager: project
                         .package_manager
@@ -524,6 +692,7 @@ fn normalize_project(project: ProjectConfig) -> Result<ProjectConfig, String> {
         name: project.name.trim().to_string(),
         path: absolute_path,
         group_id: normalized_group_id,
+        order: project.order,
         node_version: normalize_node_version(&project.node_version),
         package_manager: infer_project_package_manager(&project),
         start_command: project.start_command.trim().to_string(),
@@ -603,6 +772,60 @@ fn normalize_project_group_orders(groups: &mut [ProjectGroup]) {
     }
 }
 
+fn next_project_order(
+    projects: &[ProjectConfig],
+    group_id: Option<&str>,
+    excluding_project_id: Option<&str>,
+) -> u32 {
+    projects
+        .iter()
+        .filter(|project| {
+            project.group_id.as_deref() == group_id
+                && excluding_project_id.is_none_or(|project_id| project.id != project_id)
+        })
+        .map(|project| project.order)
+        .max()
+        .map_or(0, |order| order.saturating_add(1))
+}
+
+fn normalize_project_orders(projects: &mut Vec<ProjectConfig>, groups: &[ProjectGroup]) {
+    let group_orders = groups
+        .iter()
+        .map(|group| (group.id.clone(), group.order))
+        .collect::<HashMap<_, _>>();
+
+    let mut indexed_projects = std::mem::take(projects)
+        .into_iter()
+        .enumerate()
+        .collect::<Vec<_>>();
+
+    indexed_projects.sort_by(|(left_index, left), (right_index, right)| {
+        project_group_rank(left.group_id.as_deref(), &group_orders)
+            .cmp(&project_group_rank(right.group_id.as_deref(), &group_orders))
+            .then_with(|| left.order.cmp(&right.order))
+            .then_with(|| left_index.cmp(right_index))
+    });
+
+    let mut next_orders = HashMap::<Option<String>, u32>::new();
+    let mut normalized_projects = Vec::with_capacity(indexed_projects.len());
+
+    for (_, mut project) in indexed_projects {
+        let group_key = project.group_id.clone();
+        let next_order = next_orders.entry(group_key).or_insert(0);
+        project.order = *next_order;
+        *next_order = next_order.saturating_add(1);
+        normalized_projects.push(project);
+    }
+
+    *projects = normalized_projects;
+}
+
+fn project_group_rank(group_id: Option<&str>, group_orders: &HashMap<String, u32>) -> u32 {
+    group_id
+        .and_then(|current_group_id| group_orders.get(current_group_id).copied())
+        .map_or(0, |order| order.saturating_add(1))
+}
+
 fn remap_imported_group_id(
     group_id: Option<String>,
     group_id_map: &HashMap<String, String>,
@@ -644,18 +867,64 @@ mod tests {
 
     use super::{group_exists, normalize_project_group_orders, AppStore, ProjectGroup, StoreData};
 
+    fn build_test_store(
+        project_groups: Vec<ProjectGroup>,
+        projects: Vec<ProjectConfig>,
+    ) -> (AppStore, std::path::PathBuf) {
+        let store_path = env::temp_dir().join(format!(
+            "switch-project-store-{}.json",
+            uuid::Uuid::new_v4()
+        ));
+
+        (
+            AppStore {
+                path: store_path.clone(),
+                data: StoreData {
+                    projects,
+                    project_groups,
+                    app_startup_settings: AppStartupSettings::default(),
+                },
+            },
+            store_path,
+        )
+    }
+
+    fn build_test_project_path(label: &str) -> String {
+        env::temp_dir()
+            .join(format!("switch-project-app-{label}-{}", uuid::Uuid::new_v4()))
+            .to_string_lossy()
+            .to_string()
+    }
+
+    fn project_group_id(store: &AppStore, project_id: &str) -> Option<String> {
+        store
+            .list_projects()
+            .into_iter()
+            .find(|project| project.id == project_id)
+            .and_then(|project| project.group_id)
+    }
+
     fn build_project(id: &str, path: &str, group_id: Option<&str>) -> ProjectConfig {
         ProjectConfig {
             id: id.to_string(),
             name: format!("Project {id}"),
             path: path.to_string(),
             group_id: group_id.map(str::to_string),
+            order: 0,
             node_version: "20.0.0".to_string(),
             package_manager: ProjectPackageManager::Npm,
             start_command: "npm run dev".to_string(),
             auto_start_on_app_launch: false,
             auto_open_local_url_on_start: false,
         }
+    }
+
+    fn project_order(store: &AppStore, project_id: &str) -> Option<u32> {
+        store
+            .list_projects()
+            .into_iter()
+            .find(|project| project.id == project_id)
+            .map(|project| project.order)
     }
 
     #[test]
@@ -747,6 +1016,223 @@ mod tests {
         );
 
         let _ = fs::remove_file(import_path);
+        let _ = fs::remove_file(store_path);
+    }
+
+    #[test]
+    fn assign_projects_to_group_updates_all_requested_projects() {
+        let (mut store, store_path) = build_test_store(
+            vec![
+                ProjectGroup {
+                    id: "frontend".to_string(),
+                    name: "Frontend".to_string(),
+                    order: 0,
+                },
+                ProjectGroup {
+                    id: "legacy".to_string(),
+                    name: "Legacy".to_string(),
+                    order: 1,
+                },
+                ProjectGroup {
+                    id: "workspace".to_string(),
+                    name: "Workspace".to_string(),
+                    order: 2,
+                },
+            ],
+            vec![
+                build_project("project-1", &build_test_project_path("group-1"), None),
+                build_project(
+                    "project-2",
+                    &build_test_project_path("group-2"),
+                    Some("legacy"),
+                ),
+                build_project(
+                    "project-3",
+                    &build_test_project_path("group-3"),
+                    Some("frontend"),
+                ),
+            ],
+        );
+
+        store
+            .assign_projects_to_group(
+                "workspace",
+                &[
+                    "project-1".to_string(),
+                    "project-2".to_string(),
+                    "project-3".to_string(),
+                ],
+            )
+            .unwrap();
+
+        assert_eq!(project_group_id(&store, "project-1").as_deref(), Some("workspace"));
+        assert_eq!(project_group_id(&store, "project-2").as_deref(), Some("workspace"));
+        assert_eq!(project_group_id(&store, "project-3").as_deref(), Some("workspace"));
+        assert_eq!(project_order(&store, "project-1"), Some(0));
+        assert_eq!(project_order(&store, "project-2"), Some(1));
+        assert_eq!(project_order(&store, "project-3"), Some(2));
+
+        let _ = fs::remove_file(store_path);
+    }
+
+    #[test]
+    fn save_project_appends_new_project_to_group_end() {
+        let (mut store, store_path) = build_test_store(
+            vec![ProjectGroup {
+                id: "frontend".to_string(),
+                name: "Frontend".to_string(),
+                order: 0,
+            }],
+            vec![
+                ProjectConfig {
+                    order: 0,
+                    ..build_project(
+                        "project-1",
+                        &build_test_project_path("save-project-1"),
+                        Some("frontend"),
+                    )
+                },
+                ProjectConfig {
+                    order: 1,
+                    ..build_project(
+                        "project-2",
+                        &build_test_project_path("save-project-2"),
+                        Some("frontend"),
+                    )
+                },
+            ],
+        );
+
+        store
+            .save_project(ProjectConfig {
+                order: 0,
+                ..build_project(
+                    "project-3",
+                    &build_test_project_path("save-project-3"),
+                    Some("frontend"),
+                )
+            })
+            .unwrap();
+
+        assert_eq!(project_order(&store, "project-3"), Some(2));
+
+        let _ = fs::remove_file(store_path);
+    }
+
+    #[test]
+    fn reorder_projects_in_group_updates_orders() {
+        let (mut store, store_path) = build_test_store(
+            vec![
+                ProjectGroup {
+                    id: "frontend".to_string(),
+                    name: "Frontend".to_string(),
+                    order: 0,
+                },
+                ProjectGroup {
+                    id: "workspace".to_string(),
+                    name: "Workspace".to_string(),
+                    order: 1,
+                },
+            ],
+            vec![
+                ProjectConfig {
+                    order: 0,
+                    ..build_project(
+                        "project-1",
+                        &build_test_project_path("reorder-1"),
+                        Some("frontend"),
+                    )
+                },
+                ProjectConfig {
+                    order: 1,
+                    ..build_project(
+                        "project-2",
+                        &build_test_project_path("reorder-2"),
+                        Some("frontend"),
+                    )
+                },
+                ProjectConfig {
+                    order: 0,
+                    ..build_project(
+                        "project-3",
+                        &build_test_project_path("reorder-3"),
+                        Some("workspace"),
+                    )
+                },
+            ],
+        );
+
+        store
+            .reorder_projects_in_group(
+                "frontend",
+                &["project-2".to_string(), "project-1".to_string()],
+            )
+            .unwrap();
+
+        assert_eq!(project_order(&store, "project-2"), Some(0));
+        assert_eq!(project_order(&store, "project-1"), Some(1));
+        assert_eq!(project_order(&store, "project-3"), Some(0));
+
+        let _ = fs::remove_file(store_path);
+    }
+
+    #[test]
+    fn assign_projects_to_group_rejects_unknown_group_without_changes() {
+        let (mut store, store_path) = build_test_store(
+            vec![ProjectGroup {
+                id: "frontend".to_string(),
+                name: "Frontend".to_string(),
+                order: 0,
+            }],
+            vec![build_project(
+                "project-1",
+                &build_test_project_path("missing-group"),
+                Some("frontend"),
+            )],
+        );
+
+        let error = store
+            .assign_projects_to_group("missing-group", &["project-1".to_string()])
+            .unwrap_err();
+
+        assert_eq!(error, "所选分组不存在，请重新选择。");
+        assert_eq!(project_group_id(&store, "project-1").as_deref(), Some("frontend"));
+
+        let _ = fs::remove_file(store_path);
+    }
+
+    #[test]
+    fn assign_projects_to_group_rejects_unknown_project_without_changes() {
+        let (mut store, store_path) = build_test_store(
+            vec![
+                ProjectGroup {
+                    id: "frontend".to_string(),
+                    name: "Frontend".to_string(),
+                    order: 0,
+                },
+                ProjectGroup {
+                    id: "workspace".to_string(),
+                    name: "Workspace".to_string(),
+                    order: 1,
+                },
+            ],
+            vec![build_project(
+                "project-1",
+                &build_test_project_path("missing-project"),
+                Some("frontend"),
+            )],
+        );
+
+        let error = store
+            .assign_projects_to_group(
+                "workspace",
+                &["project-1".to_string(), "project-404".to_string()],
+            )
+            .unwrap_err();
+
+        assert_eq!(error, "存在不存在的项目，无法批量加入分组。");
+        assert_eq!(project_group_id(&store, "project-1").as_deref(), Some("frontend"));
+
         let _ = fs::remove_file(store_path);
     }
 }

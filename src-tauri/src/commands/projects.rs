@@ -94,6 +94,32 @@ pub fn reorder_project_groups(
 }
 
 #[tauri::command]
+pub fn reorder_projects_in_group(
+    state: State<ManagedState>,
+    group_id: String,
+    project_ids: Vec<String>,
+) -> Result<(), String> {
+    state
+        .store
+        .lock()
+        .map_err(lock_error)?
+        .reorder_projects_in_group(&group_id, &project_ids)
+}
+
+#[tauri::command]
+pub fn assign_projects_to_group(
+    state: State<ManagedState>,
+    group_id: String,
+    project_ids: Vec<String>,
+) -> Result<(), String> {
+    state
+        .store
+        .lock()
+        .map_err(lock_error)?
+        .assign_projects_to_group(&group_id, &project_ids)
+}
+
+#[tauri::command]
 pub fn save_project(state: State<ManagedState>, project: ProjectConfig) -> Result<(), String> {
     let project_id = project.id.clone();
     state

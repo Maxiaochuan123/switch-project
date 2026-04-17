@@ -98,6 +98,8 @@ pub fn run() {
             commands::projects::update_project_group,
             commands::projects::delete_project_group,
             commands::projects::reorder_project_groups,
+            commands::projects::reorder_projects_in_group,
+            commands::projects::assign_projects_to_group,
             commands::projects::save_project,
             commands::projects::delete_project,
             commands::runtime::list_runtimes,

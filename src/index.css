@@ -275,3 +275,39 @@ body::before {
     opacity: 0.2;
   }
 }
+
+/* Premium Drag Ripple / Sonar Effect */
+@keyframes drag-sonar-wave {
+  0% {
+    opacity: 0;
+    inset: 0px;
+  }
+  15% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    inset: calc(var(--drag-px, 8px) * -1);
+  }
+}
+
+.drag-ripple-layer {
+  animation: drag-sonar-wave 1.6s linear infinite;
+}
+
+/* Glow base removed as per user request */
+
+@keyframes drag-slot-pulse {
+  0%, 100% {
+    border-color: rgba(0, 217, 146, 0.2);
+    background-color: rgba(0, 217, 146, 0.03);
+  }
+  50% {
+    border-color: rgba(0, 217, 146, 0.4);
+    background-color: rgba(0, 217, 146, 0.06);
+  }
+}
+
+.animate-drag-slot {
+  animation: drag-slot-pulse 2s ease-in-out infinite;
+}

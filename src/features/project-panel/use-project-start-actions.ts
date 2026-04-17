@@ -6,7 +6,11 @@ import {
   type ProjectConfig,
   type ProjectRuntime,
 } from "@/shared/contracts";
-import { getErrorMessage, type Feedback } from "./helpers";
+import {
+  createProjectStartFailureEvent,
+  getErrorMessage,
+  type Feedback,
+} from "./helpers";
 import type {
   NodeInstallRequest,
   NodeRetryRequest,
@@ -51,14 +55,9 @@ export function useProjectStartActions({
       } catch (error) {
         const message = getErrorMessage(error);
         setProjectStartFailure(projectId, message);
-        showProjectOperationPanel({
-          operationId: `project-start-error:${projectId}:${Date.now()}`,
-          type: "project-start-preflight",
-          status: "error",
-          title: "启动失败",
-          projectId,
-          message,
-        });
+        showProjectOperationPanel(
+          createProjectStartFailureEvent(projectId, getProjectById(projectId)?.name ?? "当前项目", message)
+        );
         setFeedback({
           variant: "destructive",
           title: "启动项目失败",
@@ -173,15 +172,9 @@ export function useProjectStartActions({
           if (!preflight.canStart) {
             const message = preflight.reasonMessage?.trim() || "启动前检查未通过。";
             setProjectStartFailure(projectId, message);
-            showProjectOperationPanel({
-              operationId: `project-start-preflight:${projectId}:${Date.now()}`,
-              type: "project-start-preflight",
-              status: "error",
-              title: "启动失败",
-              projectId,
-              projectName: project.name,
-              message,
-            });
+            showProjectOperationPanel(
+              createProjectStartFailureEvent(projectId, project.name, message)
+            );
             setFeedback({
               variant: "destructive",
               title: "启动前检查失败",
@@ -194,15 +187,9 @@ export function useProjectStartActions({
         } catch (error) {
           const message = getErrorMessage(error);
           setProjectStartFailure(projectId, message);
-          showProjectOperationPanel({
-            operationId: `project-start-preflight:${projectId}:${Date.now()}`,
-            type: "project-start-preflight",
-            status: "error",
-            title: "启动失败",
-            projectId,
-            projectName: project.name,
-            message,
-          });
+          showProjectOperationPanel(
+            createProjectStartFailureEvent(projectId, project.name, message)
+          );
           setFeedback({
             variant: "destructive",
             title: "启动失败",

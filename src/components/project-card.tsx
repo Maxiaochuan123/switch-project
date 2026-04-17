@@ -222,9 +222,16 @@ export const ProjectCard = memo(function ProjectCard({
   const status = runtime?.status ?? "stopped";
   const isRunning = status === "running";
   const isStarting = status === "starting";
-  const isStartingPulse = isStartPending || isStarting;
-  const isStopping = isStopPending;
-  const isBusy = isRunning || isStarting;
+  const [isImmediateStartPending, setIsImmediateStartPending] = useState(false);
+  const [isImmediateStopPending, setIsImmediateStopPending] = useState(false);
+  const stopPendingResetTimerRef = useRef<number | null>(null);
+  const showImmediateStartPending =
+    isImmediateStartPending && !isRunning && !isStarting && !isStopPending;
+  const showImmediateStopPending =
+    isImmediateStopPending && !isStartPending && !isStarting;
+  const isStartingPulse = isStartPending || isStarting || showImmediateStartPending;
+  const isStopping = isStopPending || showImmediateStopPending;
+  const isBusy = isRunning || isStarting || isStopping;
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuToggleLocked, setMenuToggleLocked] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
@@ -254,6 +261,58 @@ export const ProjectCard = memo(function ProjectCard({
     window.addEventListener("mousedown", handlePointerDown);
     return () => window.removeEventListener("mousedown", handlePointerDown);
   }, [menuOpen]);
+
+  useEffect(() => {
+    if (!isImmediateStartPending) {
+      return;
+    }
+
+    if (isStartPending || isStarting || isRunning || !isStartLocked) {
+      setIsImmediateStartPending(false);
+    }
+  }, [isImmediateStartPending, isRunning, isStartLocked, isStartPending, isStarting]);
+
+  useEffect(() => {
+    if (!isImmediateStopPending) {
+      return;
+    }
+
+    if (!isRunning && stopPendingResetTimerRef.current) {
+      window.clearTimeout(stopPendingResetTimerRef.current);
+      stopPendingResetTimerRef.current = null;
+    }
+
+    if (isStopPending) {
+      return;
+    }
+
+    if (!isRunning) {
+      setIsImmediateStopPending(false);
+      return;
+    }
+
+    if (!stopPendingResetTimerRef.current) {
+      stopPendingResetTimerRef.current = window.setTimeout(() => {
+        stopPendingResetTimerRef.current = null;
+        setIsImmediateStopPending(false);
+      }, 240);
+    }
+  }, [
+    isImmediateStopPending,
+    isRunning,
+    isStartPending,
+    isStarting,
+    isStopPending,
+  ]);
+
+  useEffect(() => {
+    return () => {
+      if (stopPendingResetTimerRef.current) {
+        window.clearTimeout(stopPendingResetTimerRef.current);
+        stopPendingResetTimerRef.current = null;
+      }
+    };
+  }, []);
 
   function handleToggleMenu() {
     if (menuToggleLocked) {
@@ -298,8 +357,12 @@ export const ProjectCard = memo(function ProjectCard({
   const diagnosisTone =
     panelState.kind === "diagnosis" ? getDiagnosisTone(panelState.diagnosis) : null;
   const showStopLoading = isStopping;
-  const showStartLoading = isStartPending || isStarting;
+  const showStartLoading = isStartPending || isStarting || showImmediateStartPending;
   const isShowingStopState = isRunning || showStopLoading;
+  const isActionButtonDisabled =
+    showStartLoading ||
+    showStopLoading ||
+    (isShowingStopState ? isStopLocked : isStartLocked);
   const actionButtonLabel = showStopLoading
     ? "停止中..."
     : showStartLoading
@@ -310,6 +373,21 @@ export const ProjectCard = memo(function ProjectCard({
 
   const isShowMultiMarquee = isRunning && panelState.kind === "addresses";
   const isShowGreenMarquee = isStartingPulse || (isRunning && !isShowMultiMarquee);
+
+  function handleActionButtonClick() {
+    if (isActionButtonDisabled) {
+      return;
+    }
+
+    if (isShowingStopState) {
+      setIsImmediateStopPending(true);
+      onStop();
+      return;
+    }
+
+    setIsImmediateStartPending(true);
+    onStart();
+  }
 
   return (
     <Card
@@ -619,8 +697,8 @@ export const ProjectCard = memo(function ProjectCard({
             "h-9 gap-1.5 px-4 transition-all active:scale-95",
             isShowingStopState && "shadow-[0_0_15px_rgba(251,86,91,0.15)]"
           )}
-          onClick={isShowingStopState ? onStop : onStart}
-          disabled={showStopLoading || (isShowingStopState ? isStopLocked : isStartLocked)}
+          onClick={handleActionButtonClick}
+          disabled={isActionButtonDisabled}
         >
           {showStopLoading || showStartLoading ? (
             <LoaderCircle className="size-4 animate-spin" />

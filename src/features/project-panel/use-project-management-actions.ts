@@ -4,6 +4,7 @@ import { isProjectRuntimeActive, getErrorMessage, type Feedback } from "./helper
 import type { ProjectDraft } from "./project-draft";
 import type {
   ProjectConfig,
+  ProjectGroup,
   ProjectPackageManager,
   ProjectRuntime,
 } from "@/shared/contracts";
@@ -22,6 +23,7 @@ type UseProjectManagementActionsOptions = {
   setDeleteTarget: Dispatch<SetStateAction<ProjectConfig | null>>;
   setFeedback: Dispatch<SetStateAction<Feedback | null>>;
   setFormError: Dispatch<SetStateAction<string | null>>;
+  setProjectGroups: Dispatch<SetStateAction<ProjectGroup[]>>;
   setTerminalTarget: Dispatch<SetStateAction<ProjectConfig | null>>;
   syncProjects: (projects: ProjectConfig[]) => void;
   terminalTargetId?: string;
@@ -41,6 +43,7 @@ export function useProjectManagementActions({
   setDeleteTarget,
   setFeedback,
   setFormError,
+  setProjectGroups,
   setTerminalTarget,
   syncProjects,
   terminalTargetId,
@@ -104,11 +107,15 @@ export function useProjectManagementActions({
       try {
         let resolvedGroupId = draft.groupId;
         let createdGroupId: string | null = null;
+        let createdGroup: ProjectGroup | null = null;
+        
         const pendingGroup = pendingProjectGroups.find((group) => group.id === draft.groupId);
         if (pendingGroup) {
-          const createdGroup = await desktopApi.createProjectGroup(pendingGroup.name);
+          createdGroup = await desktopApi.createProjectGroup(pendingGroup.name);
           resolvedGroupId = createdGroup.id;
           createdGroupId = createdGroup.id;
+          // 立即更新分组列表
+          setProjectGroups((current) => [...current, createdGroup!]);
         }
 
         const nextProject: ProjectConfig = {
@@ -116,6 +123,7 @@ export function useProjectManagementActions({
           name: draft.name,
           path: draft.path,
           groupId: resolvedGroupId,
+          order: currentProject?.order ?? 0,
           nodeVersion: draft.nodeVersion,
           packageManager: draft.packageManager as ProjectPackageManager,
           startCommand: draft.startCommand,
@@ -124,7 +132,18 @@ export function useProjectManagementActions({
         };
 
         await desktopApi.saveProject(nextProject);
-        await loadProjectData();
+        
+        // 乐观更新: 立即更新项目列表
+        if (currentProject) {
+          // 更新现有项目
+          syncProjects(
+            projects.map((p) => (p.id === nextProject.id ? nextProject : p))
+          );
+        } else {
+          // 添加新项目
+          syncProjects([...projects, nextProject]);
+        }
+        
         if (createdGroupId) {
           setActiveGroupTab?.(createdGroupId);
         }
@@ -142,7 +161,6 @@ export function useProjectManagementActions({
       clearDraftProjectGroups,
       getProjectById,
       handleProjectDialogOpenChange,
-      loadProjectData,
       normalizeProjectPath,
       pendingProjectGroups,
       projects,
@@ -151,6 +169,8 @@ export function useProjectManagementActions({
       setActiveGroupTab,
       setFeedback,
       setFormError,
+      setProjectGroups,
+      syncProjects,
     ]
   );
 
@@ -163,6 +183,9 @@ export function useProjectManagementActions({
 
     setIsSubmitting(true);
     setDeleteTarget(null);
+    
+    // 乐观更新: 先更新 UI
+    const previousProjects = projects;
     syncProjects(projects.filter((project) => project.id !== deletingProject.id));
     if (terminalTargetId === deletingProject.id) {
       setTerminalTarget(null);
@@ -170,9 +193,10 @@ export function useProjectManagementActions({
 
     try {
       await desktopApi.deleteProject(deletingProject.id);
-      await loadProjectData();
+      // 删除成功,不需要重新加载
     } catch (error) {
-      await loadProjectData();
+      // 失败时回滚
+      syncProjects(previousProjects);
       setFeedback({
         variant: "destructive",
         title: "移除项目失败",
@@ -194,14 +218,19 @@ export function useProjectManagementActions({
 
   const handleMoveProjectToGroup = useCallback(
     async (project: ProjectConfig, groupId: string | null) => {
+      // 乐观更新: 先更新 UI
+      const previousProjects = projects;
+      const updatedProject = { ...project, groupId };
+      syncProjects(
+        projects.map((p) => (p.id === project.id ? updatedProject : p))
+      );
+
       try {
-        await desktopApi.saveProject({
-          ...project,
-          groupId,
-        });
-        await loadProjectData();
+        await desktopApi.saveProject(updatedProject);
         return true;
       } catch (error) {
+        // 失败时回滚
+        syncProjects(previousProjects);
         setFeedback({
           variant: "destructive",
           title: "切换分组失败",
@@ -210,7 +239,7 @@ export function useProjectManagementActions({
         return false;
       }
     },
-    [loadProjectData, setFeedback]
+    [projects, setFeedback, syncProjects]
   );
 
   const handleAssignProjectsToGroup = useCallback(
@@ -221,23 +250,27 @@ export function useProjectManagementActions({
 
       setIsSubmitting(true);
 
-      try {
-        for (const project of targetProjects) {
-          await desktopApi.saveProject({
-            ...project,
-            groupId: targetGroupId,
-          });
-        }
+      // 乐观更新: 先更新 UI
+      const previousProjects = projects;
+      const targetProjectIds = new Set(targetProjects.map((p) => p.id));
+      syncProjects(
+        projects.map((project) =>
+          targetProjectIds.has(project.id)
+            ? { ...project, groupId: targetGroupId }
+            : project
+        )
+      );
 
-        await loadProjectData();
+      try {
+        await desktopApi.assignProjectsToGroup(
+          targetGroupId,
+          targetProjects.map((project) => project.id)
+        );
         return true;
       } catch (error) {
-        try {
-          await loadProjectData();
-        } catch {
-          // Keep the original assignment error as the main feedback.
-        }
-
+        // 失败时回滚
+        syncProjects(previousProjects);
+        
         setFeedback({
           variant: "destructive",
           title: "批量加入分组失败",
@@ -248,7 +281,7 @@ export function useProjectManagementActions({
         setIsSubmitting(false);
       }
     },
-    [loadProjectData, setFeedback]
+    [projects, setFeedback, syncProjects]
   );
 
   return {

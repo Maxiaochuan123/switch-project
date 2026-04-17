@@ -4,7 +4,7 @@ use tokio::{
     process::Child,
 };
 
-use crate::contracts::{ProjectLogLevel, ProjectStatus};
+use crate::contracts::ProjectLogLevel;
 
 pub(super) async fn read_stream<R>(
     app: AppHandle,
@@ -25,26 +25,13 @@ pub(super) async fn read_stream<R>(
 }
 
 pub(super) async fn wait_for_exit(app: AppHandle, project_id: String, mut child: Child) {
-    let exit_code = child.wait().await.ok().and_then(|status| status.code());
+    let exit_result = child.wait().await;
+    let exit_code = exit_result.as_ref().ok().and_then(|status| status.code());
     let state = app.state::<crate::ManagedState>();
-    let message = if exit_code == Some(0) || exit_code.is_none() {
-        Some("进程已结束。".to_string())
-    } else {
-        Some(format!(
-            "进程异常退出，退出码 {}。",
-            exit_code.unwrap_or(-1)
-        ))
-    };
-
-    state.runtime_manager.finish_runtime(
+    state.runtime_manager.finish_runtime_after_exit(
         &app,
         &project_id,
-        if exit_code == Some(0) || exit_code.is_none() {
-            ProjectStatus::Stopped
-        } else {
-            ProjectStatus::Error
-        },
         exit_code,
-        message,
+        exit_result.err().map(|error| error.to_string()),
     );
 }

@@ -2,6 +2,7 @@ use std::{path::PathBuf, process::Stdio};
 
 use chrono::Utc;
 use tauri::{AppHandle, Manager};
+use tokio::process::Child;
 use tokio::time::{sleep, Duration};
 
 use crate::commands::common::{assess_project_start, ProjectStartAssessment};
@@ -192,7 +193,7 @@ impl RuntimeManager {
             })
             .unwrap_or_else(|| (Vec::new(), 0, RuntimeStartupTimeline::default()));
 
-        let mut command = create_async_context_command(
+        let mut command = match create_async_context_command(
             "cmd.exe",
             vec![
                 "/d".to_string(),
@@ -202,27 +203,91 @@ impl RuntimeManager {
             ],
             Some(&project.node_version),
             Some(&project_path),
-        )?;
+        ) {
+            Ok(command) => command,
+            Err(error) => {
+                self.emit_start_error(
+                    app,
+                    &project.id,
+                    &selected_node_version,
+                    started_at.clone(),
+                    start_timestamp_ms,
+                    error.clone(),
+                );
+                return Err(error);
+            }
+        };
         command
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
 
-        let mut child = command
-            .spawn()
-            .map_err(|error| format!("启动项目失败: {error}"))?;
+        let mut child = match command.spawn() {
+            Ok(child) => child,
+            Err(error) => {
+                let message = format!("启动项目失败: {error}");
+                self.emit_start_error(
+                    app,
+                    &project.id,
+                    &selected_node_version,
+                    started_at.clone(),
+                    start_timestamp_ms,
+                    message.clone(),
+                );
+                return Err(message);
+            }
+        };
 
-        let pid = child
-            .id()
-            .ok_or_else(|| "无法读取项目进程 PID".to_string())?;
-        let stdout = child
-            .stdout
-            .take()
-            .ok_or_else(|| "无法读取标准输出".to_string())?;
-        let stderr = child
-            .stderr
-            .take()
-            .ok_or_else(|| "无法读取标准错误".to_string())?;
+        let pid = match child.id() {
+            Some(pid) => pid,
+            None => {
+                let message = "无法读取项目进程 PID".to_string();
+                cleanup_failed_child_process(&mut child).await;
+                self.emit_start_error(
+                    app,
+                    &project.id,
+                    &selected_node_version,
+                    started_at.clone(),
+                    start_timestamp_ms,
+                    message.clone(),
+                );
+                return Err(message);
+            }
+        };
+
+        let stdout = match child.stdout.take() {
+            Some(stdout) => stdout,
+            None => {
+                let message = "无法读取标准输出".to_string();
+                cleanup_failed_child_process(&mut child).await;
+                self.emit_start_error(
+                    app,
+                    &project.id,
+                    &selected_node_version,
+                    started_at.clone(),
+                    start_timestamp_ms,
+                    message.clone(),
+                );
+                return Err(message);
+            }
+        };
+
+        let stderr = match child.stderr.take() {
+            Some(stderr) => stderr,
+            None => {
+                let message = "无法读取标准错误".to_string();
+                cleanup_failed_child_process(&mut child).await;
+                self.emit_start_error(
+                    app,
+                    &project.id,
+                    &selected_node_version,
+                    started_at.clone(),
+                    start_timestamp_ms,
+                    message.clone(),
+                );
+                return Err(message);
+            }
+        };
 
         if project.auto_open_local_url_on_start {
             self.pending_auto_open
@@ -311,6 +376,18 @@ impl RuntimeManager {
         Ok(())
     }
 
+    fn take_failed_start_entry(&self, project_id: &str) -> Option<RuntimeEntry> {
+        self.pending_auto_open
+            .lock()
+            .expect("pending auto open poisoned")
+            .remove(project_id);
+
+        self.entries
+            .lock()
+            .expect("runtime entries poisoned")
+            .remove(project_id)
+    }
+
     fn emit_start_error(
         &self,
         app: &AppHandle,
@@ -322,10 +399,7 @@ impl RuntimeManager {
     ) {
         let completed_at_ms = Utc::now().timestamp_millis();
         let mut entry = self
-            .entries
-            .lock()
-            .expect("runtime entries poisoned")
-            .remove(project_id)
+            .take_failed_start_entry(project_id)
             .unwrap_or_else(|| RuntimeEntry {
                 pid: 0,
                 expected_stop: false,
@@ -389,5 +463,72 @@ impl RuntimeManager {
                 ..entry.runtime
             },
         );
+    }
+}
+
+async fn cleanup_failed_child_process(child: &mut Child) {
+    let _ = child.kill().await;
+    let _ = child.wait().await;
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::contracts::{ProjectRuntime, ProjectStatus};
+
+    use super::{RuntimeEntry, RuntimeManager, RuntimeStartupTimeline};
+
+    #[test]
+    fn take_failed_start_entry_clears_runtime_and_auto_open_state() {
+        let runtime_manager = RuntimeManager::new();
+        runtime_manager
+            .entries
+            .lock()
+            .expect("runtime entries poisoned")
+            .insert("project-1".to_string(), build_runtime_entry("project-1"));
+        runtime_manager
+            .pending_auto_open
+            .lock()
+            .expect("pending auto open poisoned")
+            .insert("project-1".to_string());
+
+        let removed = runtime_manager.take_failed_start_entry("project-1");
+
+        assert!(removed.is_some());
+        assert!(!runtime_manager.is_project_active("project-1"));
+        assert!(
+            !runtime_manager
+                .pending_auto_open
+                .lock()
+                .expect("pending auto open poisoned")
+                .contains("project-1")
+        );
+    }
+
+    fn build_runtime_entry(project_id: &str) -> RuntimeEntry {
+        RuntimeEntry {
+            pid: 1234,
+            expected_stop: false,
+            preview_priority: 0,
+            log_sequence: 0,
+            start_timestamp_ms: 0,
+            selected_node_version: "24.14.1".to_string(),
+            startup_timeline: RuntimeStartupTimeline::default(),
+            runtime: ProjectRuntime {
+                project_id: project_id.to_string(),
+                status: ProjectStatus::Starting,
+                pid: Some(1234),
+                started_at: Some("2026-04-10T00:00:00Z".to_string()),
+                exit_code: None,
+                last_message: None,
+                failure_message: None,
+                failure_code: None,
+                suggested_node_version: None,
+                detected_url: None,
+                detected_addresses: Vec::new(),
+                startup_duration_ms: None,
+                last_success_at: None,
+                recent_logs: Vec::new(),
+            },
+        }
     }
 }

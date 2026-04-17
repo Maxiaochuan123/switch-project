@@ -39,9 +39,7 @@ export function DeleteProjectGroupDialog({
           </AlertDialogMedia>
           <AlertDialogTitle>删除分组</AlertDialogTitle>
           <AlertDialogDescription>
-            {group
-              ? `删除“${group.name}”后，组内项目不会被删除，会自动回到未分组。`
-              : "删除分组后，组内项目会自动回到未分组。"}
+            删除“{group.name}”后，组内项目会恢复未分组状态，并回到全部tab
           </AlertDialogDescription>
         </AlertDialogHeader>
 

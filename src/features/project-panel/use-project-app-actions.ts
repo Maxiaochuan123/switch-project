@@ -37,6 +37,18 @@ export function useProjectAppActions({
       const nextStartupSettings = await desktopApi.getAppStartupSettings();
       setStartupSettings(nextStartupSettings);
       setStartupSettingsDraft(nextStartupSettings);
+
+      if (nextStartupSettings.openAtLogin !== startupSettingsDraft.openAtLogin) {
+        setFeedback({
+          variant: "destructive",
+          title: "开机自启设置未生效",
+          message: startupSettingsDraft.openAtLogin
+            ? "系统没有开启开机自启，当前已恢复为实际状态。"
+            : "系统没有关闭开机自启，当前已恢复为实际状态。",
+        });
+        return;
+      }
+
       setIsStartupSettingsDialogOpen(false);
       setFeedback(null);
     } catch (error) {

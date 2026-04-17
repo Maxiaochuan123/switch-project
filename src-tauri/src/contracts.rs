@@ -42,6 +42,8 @@ pub struct ProjectConfig {
     pub path: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub group_id: Option<String>,
+    #[serde(default)]
+    pub order: u32,
     pub node_version: String,
     #[serde(default = "default_project_package_manager")]
     pub package_manager: ProjectPackageManager,

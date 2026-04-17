@@ -9,7 +9,7 @@ export type ProjectStatus = "stopped" | "starting" | "running" | "error";
 
 export type ProjectPackageManager = "npm" | "pnpm" | "cnpm" | "yarn";
 
-export type ProjectConfig = { id: string, name: string, path: string, groupId: string | null, nodeVersion: string, packageManager: ProjectPackageManager, startCommand: string, autoStartOnAppLaunch: boolean, autoOpenLocalUrlOnStart: boolean, };
+export type ProjectConfig = { id: string, name: string, path: string, groupId: string | null, order: number, nodeVersion: string, packageManager: ProjectPackageManager, startCommand: string, autoStartOnAppLaunch: boolean, autoOpenLocalUrlOnStart: boolean, };
 
 export type ProjectGroup = { id: string, name: string, order: number, };
 

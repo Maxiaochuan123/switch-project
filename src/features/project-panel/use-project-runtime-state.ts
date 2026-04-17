@@ -1,7 +1,13 @@
 import { startTransition, useCallback, useEffect, useRef, useState } from "react";
 import { desktopApi } from "@/lib/desktop";
 import type { ProjectConfig, ProjectRuntime } from "@/shared/contracts";
-import { areProjectRuntimesEqual, isDependencyOperationEvent } from "./helpers";
+import {
+  areProjectRuntimesEqual,
+  createProjectStartFailureEvent,
+  getProjectRuntimeErrorMessage,
+  hasProjectRuntimePanelContent,
+  isDependencyOperationEvent,
+} from "./helpers";
 import { useProjectDiagnosisState } from "./use-project-diagnosis-state";
 import { useProjectOperationState } from "./use-project-operation-state";
 
@@ -16,35 +22,13 @@ type UseProjectRuntimeStateOptions = {
   onClearRetrySuggestion: (projectId: string) => void;
 };
 
-function getRuntimeFailureMessage(runtime: ProjectRuntime) {
-  if (runtime.failureMessage?.trim()) {
-    return runtime.failureMessage.trim();
-  }
-
-  const recentLogMessage = [...(runtime.recentLogs ?? [])]
-    .reverse()
-    .map((entry) => entry.message.trim())
-    .find(Boolean);
-
-  return runtime.lastMessage?.trim() || recentLogMessage || "启动失败，请查看终端输出。";
-}
-
-function hasRuntimePanelContent(runtime: ProjectRuntime) {
-  if (runtime.detectedAddresses.length > 0) {
-    return true;
-  }
-
-  return runtime.recentLogs.some(
-    (entry) => entry.level !== "system" && entry.message.trim().length > 0
-  );
-}
-
 function shouldFlushRuntimeUpdateImmediately(
   currentRuntime: ProjectRuntime | undefined,
   nextRuntime: ProjectRuntime
 ) {
   return (
-    currentRuntime?.status !== nextRuntime.status || hasRuntimePanelContent(nextRuntime)
+    currentRuntime?.status !== nextRuntime.status ||
+    hasProjectRuntimePanelContent(nextRuntime)
   );
 }
 
@@ -56,6 +40,8 @@ export function useProjectRuntimeState({
   const [runtimes, setRuntimes] = useState<Record<string, ProjectRuntime>>({});
   const pendingRuntimeUpdatesRef = useRef<Record<string, ProjectRuntime>>({});
   const runtimeFlushTimerRef = useRef<number | null>(null);
+  const onSuggestRetryRef = useRef(onSuggestRetry);
+  const onClearRetrySuggestionRef = useRef(onClearRetrySuggestion);
   const projectsByIdRef = useRef<Record<string, ProjectConfig>>(
     Object.fromEntries(projects.map((project) => [project.id, project]))
   );
@@ -71,6 +57,11 @@ export function useProjectRuntimeState({
     setProjectStartFailure,
     showProjectOperationPanel,
   } = useProjectOperationState();
+
+  useEffect(() => {
+    onSuggestRetryRef.current = onSuggestRetry;
+    onClearRetrySuggestionRef.current = onClearRetrySuggestion;
+  }, [onClearRetrySuggestion, onSuggestRetry]);
 
   useEffect(() => {
     projectsByIdRef.current = Object.fromEntries(
@@ -199,22 +190,22 @@ export function useProjectRuntimeState({
       queueRuntimeUpdate(runtime);
 
       if (runtime.status === "running") {
-        if (hasRuntimePanelContent(runtime)) {
+        if (hasProjectRuntimePanelContent(runtime)) {
           clearProjectOperationPanel(runtime.projectId);
         }
 
         clearProjectStartFailure(runtime.projectId);
-        onClearRetrySuggestion(runtime.projectId);
+        onClearRetrySuggestionRef.current(runtime.projectId);
         return;
       }
 
       if (runtime.status === "starting") {
-        if (hasRuntimePanelContent(runtime)) {
+        if (hasProjectRuntimePanelContent(runtime)) {
           clearProjectOperationPanel(runtime.projectId);
         }
 
         clearProjectStartFailure(runtime.projectId);
-        onClearRetrySuggestion(runtime.projectId);
+        onClearRetrySuggestionRef.current(runtime.projectId);
         return;
       }
 
@@ -231,21 +222,14 @@ export function useProjectRuntimeState({
         return;
       }
 
-      const failureMessage = getRuntimeFailureMessage(runtime);
+      const failureMessage = getProjectRuntimeErrorMessage(runtime);
       setProjectStartFailure(project.id, failureMessage);
-
-      showProjectOperationPanel({
-        operationId: `project-start-failed:${project.id}:${Date.now()}`,
-        type: "project-start-preflight",
-        status: "error",
-        title: "启动失败",
-        projectId: project.id,
-        projectName: project.name,
-        message: failureMessage,
-      });
+      showProjectOperationPanel(
+        createProjectStartFailureEvent(project.id, project.name, failureMessage)
+      );
 
       if (runtime.suggestedNodeVersion) {
-        onSuggestRetry({
+        onSuggestRetryRef.current({
           project,
           suggestedNodeVersion: runtime.suggestedNodeVersion,
         });
@@ -287,8 +271,6 @@ export function useProjectRuntimeState({
     clearProjectDiagnosis,
     clearProjectOperationPanel,
     clearProjectStartFailure,
-    onClearRetrySuggestion,
-    onSuggestRetry,
     queueRuntimeUpdate,
     queueProjectDiagnosis,
     setDependencyOperationStatus,

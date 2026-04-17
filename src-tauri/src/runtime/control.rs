@@ -15,6 +15,25 @@ use super::{
 };
 
 impl RuntimeManager {
+    pub fn finish_runtime_after_exit(
+        &self,
+        app: &AppHandle,
+        project_id: &str,
+        exit_code: Option<i32>,
+        wait_error: Option<String>,
+    ) {
+        let expected_stop = self
+            .entries
+            .lock()
+            .expect("runtime entries poisoned")
+            .get(project_id)
+            .map(|entry| entry.expected_stop)
+            .unwrap_or(false);
+        let (status, message) = resolve_process_exit_outcome(expected_stop, exit_code, wait_error);
+
+        self.finish_runtime(app, project_id, status, exit_code, message);
+    }
+
     pub fn stop_project(&self, app: &AppHandle, project_id: &str) -> Result<(), String> {
         let pid = {
             let mut entries = self.entries.lock().expect("runtime entries poisoned");
@@ -247,5 +266,72 @@ impl EmptyFallback for &str {
         } else {
             self.to_string()
         }
+    }
+}
+
+fn resolve_process_exit_outcome(
+    expected_stop: bool,
+    exit_code: Option<i32>,
+    wait_error: Option<String>,
+) -> (ProjectStatus, Option<String>) {
+    if expected_stop {
+        let message = if wait_error.is_some() {
+            "项目已停止，但未能确认退出状态。".to_string()
+        } else {
+            "已从面板停止项目。".to_string()
+        };
+
+        return (ProjectStatus::Stopped, Some(message));
+    }
+
+    if let Some(error) = wait_error {
+        return (
+            ProjectStatus::Error,
+            Some(format!("读取进程退出状态失败: {error}")),
+        );
+    }
+
+    match exit_code {
+        Some(0) => (ProjectStatus::Stopped, Some("进程已结束。".to_string())),
+        Some(code) => (
+            ProjectStatus::Error,
+            Some(format!("进程异常退出，退出码 {code}。")),
+        ),
+        None => (
+            ProjectStatus::Error,
+            Some("进程异常结束，未返回退出码。".to_string()),
+        ),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::contracts::ProjectStatus;
+
+    use super::resolve_process_exit_outcome;
+
+    #[test]
+    fn resolve_process_exit_outcome_treats_wait_errors_as_runtime_errors() {
+        let (status, message) =
+            resolve_process_exit_outcome(false, None, Some("access denied".to_string()));
+
+        assert_eq!(status, ProjectStatus::Error);
+        assert_eq!(message.as_deref(), Some("读取进程退出状态失败: access denied"));
+    }
+
+    #[test]
+    fn resolve_process_exit_outcome_keeps_expected_stops_as_stopped() {
+        let (status, message) = resolve_process_exit_outcome(true, Some(1), None);
+
+        assert_eq!(status, ProjectStatus::Stopped);
+        assert_eq!(message.as_deref(), Some("已从面板停止项目。"));
+    }
+
+    #[test]
+    fn resolve_process_exit_outcome_marks_missing_exit_code_as_error() {
+        let (status, message) = resolve_process_exit_outcome(false, None, None);
+
+        assert_eq!(status, ProjectStatus::Error);
+        assert_eq!(message.as_deref(), Some("进程异常结束，未返回退出码。"));
     }
 }
