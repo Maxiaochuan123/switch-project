@@ -9,7 +9,7 @@
     "jsx": "react-jsx",
     "sourceMap": true,
     "baseUrl": ".",
-    "ignoreDeprecations": "6.0",
+    "ignoreDeprecations": "5.0",
     "types": [
       "node",
       "vite/client"
