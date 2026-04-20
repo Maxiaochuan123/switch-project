@@ -3957,7 +3957,7 @@ dependencies = [
 
 [[package]]
 name = "switch-project-panel"
-version = "2.0.0"
+version = "1.0.0"
 dependencies = [
  "chrono",
  "dirs 6.0.0",
