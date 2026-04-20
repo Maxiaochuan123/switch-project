@@ -30,14 +30,11 @@ interface UpdateResponse {
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const { current_version } = req.query;
 
-  // GitHub 仓库设置
   const OWNER = 'Maxiaochuan123';
   const REPO = 'switch-project';
 
   try {
     const url = `https://api.github.com/repos/${OWNER}/${REPO}/releases/latest`;
-    console.log(`Fetching from: ${url}`);
-    
     const response = await fetch(url, {
       headers: {
         'Accept': 'application/vnd.github.v3+json',
@@ -46,33 +43,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     });
 
     if (!response.ok) {
-        const errorText = await response.text();
-        console.error(`GitHub API Error (${response.status}):`, errorText);
-        return res.status(response.status).json({ 
-            message: 'Failed to fetch release from GitHub',
-            status: response.status,
-            github_error: errorText
-        });
+        return res.status(response.status).json({ message: 'Failed to fetch release from GitHub' });
     }
 
     const release: GitHubRelease = await response.json() as GitHubRelease;
     
-    // Tauri 2.0 期望的 JSON 格式
     const updateResponse: UpdateResponse = {
-      version: release.tag_name.replace(/^v/, ''), // 移除 v 前缀 (v2.0.1 -> 2.0.1)
+      version: release.tag_name.replace(/^v/, ''),
       notes: release.body,
       pub_date: release.published_at,
       platforms: {},
     };
 
-    // 遍历附件找安装包和对应的 .sig 文件
     for (const asset of release.assets) {
       const name = asset.name;
       
-      // 如果是签名文件 (.sig)
       if (name.endsWith('.sig')) {
         const baseName = name.replace('.sig', '');
-        // 查找对应的安装包资产
         const targetAsset = release.assets.find((a: GitHubAsset) => a.name === baseName);
         if (targetAsset) {
             const platform = getPlatformKey(baseName);
@@ -89,7 +76,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     }
 
-    // 如果当前版本已是最新，返回 204 No Content
     if (current_version === updateResponse.version) {
         return res.status(204).send('');
     }
