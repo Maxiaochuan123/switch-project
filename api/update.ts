@@ -35,7 +35,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const REPO = 'switch-project';
 
   try {
-    const response = await fetch(`https://api.github.com/repos/${OWNER}/${REPO}/releases/latest`, {
+    const url = `https://api.github.com/repos/${OWNER}/${REPO}/releases/latest`;
+    console.log(`Fetching from: ${url}`);
+    
+    const response = await fetch(url, {
       headers: {
         'Accept': 'application/vnd.github.v3+json',
         'User-Agent': 'Tauri-Updater-Vercel',
