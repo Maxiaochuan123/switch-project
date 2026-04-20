@@ -42,8 +42,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       headers: {
         'Accept': 'application/vnd.github.v3+json',
         'User-Agent': 'Tauri-Updater-Vercel',
-        // 如果遇到频率限制，可以在 Vercel 环境变量中添加 GITHUB_TOKEN
-        ...(process.env.GITHUB_TOKEN ? { 'Authorization': `Bearer ${process.env.GITHUB_TOKEN}` } : {}),
       },
     });
 
