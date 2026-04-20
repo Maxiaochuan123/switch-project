@@ -45,7 +45,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     });
 
     if (!response.ok) {
-        return res.status(response.status).json({ message: 'Failed to fetch release from GitHub' });
+        const errorText = await response.text();
+        console.error(`GitHub API Error (${response.status}):`, errorText);
+        return res.status(response.status).json({ 
+            message: 'Failed to fetch release from GitHub',
+            status: response.status,
+            github_error: errorText
+        });
     }
 
     const release: GitHubRelease = await response.json() as GitHubRelease;
