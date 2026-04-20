@@ -13,19 +13,24 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - platform: "windows-latest" # Windows 安装包
-          # 如果将来需要其他平台，可以在这里添加：
-          # - platform: "macos-latest"
-          # - platform: "ubuntu-22.04"
+          - platform: "windows-latest"
 
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v4
 
+      # 1. 优化 Node.js 缓存
       - name: setup node
         uses: actions/setup-node@v4
         with:
           node-version: 24
+          cache: 'npm' # 自动缓存 node_modules
+
+      # 2. 核心优化：使用 Rust 专用缓存
+      - name: Rust Cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
 
       - name: install Rust stable
         uses: dtolnay/rust-toolchain@stable
@@ -43,11 +48,10 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # 自动更新签名密钥（如果有的话）
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
-          tagName: v__VERSION__ # 使用 package.json 中的版本号作为标签名
+          tagName: v__VERSION__
           releaseName: "Current v__VERSION__"
           releaseBody: "See the assets below to download the latest version."
           releaseDraft: true
